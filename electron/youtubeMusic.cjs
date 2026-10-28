@@ -46,104 +46,155 @@ function fetchInnerTube(browseId, params = null, cookieHeader = '') {
 }
 
 /**
- * Parses the YouTube Music Explore page (Trending, New Releases, Moods & Genres)
+ * Parses the YouTube Music Explore page (Top songs chart, New Releases, Trending, Moods & Genres)
  */
-async function getExploreData() {
+async function getExploreData(cookieHeader = '') {
   try {
-    const data = await fetchInnerTube('FEmusic_explore');
-    const tabs = data.contents?.singleColumnBrowseResultsRenderer?.tabs || [];
-    const secList = tabs[0]?.tabRenderer?.content?.sectionListRenderer?.contents || [];
+    const [exploreData, chartData] = await Promise.all([
+      fetchInnerTube('FEmusic_explore', null, cookieHeader).catch(() => null),
+      fetchInnerTube('VLPL4fGSI1pDJn61j743B9r2LNeLCUUZsRMV', null, cookieHeader).catch(() => null),
+    ]);
 
     const result = {
-      trending: [],
+      topSongs: [],
       newReleases: [],
+      trending: [],
       moodsAndGenres: [],
     };
 
-    for (const sec of secList) {
-      const carousel = sec.musicCarouselShelfRenderer || sec.musicShelfRenderer || {};
-      const title =
-        carousel.header?.musicCarouselShelfBasicHeaderRenderer?.title?.runs?.[0]?.text || '';
-      const items = carousel.contents || [];
-      const titleLower = title.toLowerCase();
+    // 1. Parse Top Songs Ranking (Peru / Regional Top Songs Chart from YouTube Music)
+    if (chartData) {
+      const sec =
+        chartData.contents?.twoColumnBrowseResultsRenderer?.secondaryContents?.sectionListRenderer
+          ?.contents?.[0];
+      const chartItems = sec?.musicPlaylistShelfRenderer?.contents || [];
 
-      // 1. Trending Songs
-      if (titleLower.includes('tendencias') || titleLower.includes('trending')) {
-        for (const it of items) {
-          const item = it.musicResponsiveListItemRenderer;
-          if (!item) continue;
-          const songTitle =
-            item.flexColumns?.[0]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]
-              ?.text;
-          const artist =
-            item.flexColumns?.[1]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]
-              ?.text;
-          const thumb =
-            item.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails?.slice(-1)[0]?.url;
-          const videoId =
-            item.overlay?.musicItemThumbnailOverlayRenderer?.content?.musicPlayButtonRenderer
-              ?.playNavigationEndpoint?.watchEndpoint?.videoId ||
-            item.navigationEndpoint?.watchEndpoint?.videoId;
+      chartItems.slice(0, 30).forEach((it, idx) => {
+        const item = it.musicResponsiveListItemRenderer;
+        if (!item) return;
 
-          if (songTitle && videoId) {
-            result.trending.push({
-              title: songTitle,
-              artist: artist || 'Artista Destacado',
-              videoId,
-              thumbnail: thumb || `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
-            });
+        const songTitle =
+          item.flexColumns?.[0]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]?.text;
+        const artistRuns =
+          item.flexColumns?.[1]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs || [];
+        const artist = artistRuns.map((r) => r.text).join('');
+        const thumb =
+          item.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails?.slice(-1)[0]?.url;
+        const videoId =
+          item.overlay?.musicItemThumbnailOverlayRenderer?.content?.musicPlayButtonRenderer
+            ?.playNavigationEndpoint?.watchEndpoint?.videoId ||
+          item.navigationEndpoint?.watchEndpoint?.videoId;
+
+        if (songTitle && videoId) {
+          result.topSongs.push({
+            rank: idx + 1,
+            title: songTitle,
+            artist: artist || 'Artista',
+            videoId,
+            thumbnail: thumb || `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+          });
+        }
+      });
+    }
+
+    // 2. Parse Explore Sections (New Releases, Trending, Moods & Genres)
+    if (exploreData) {
+      const tabs = exploreData.contents?.singleColumnBrowseResultsRenderer?.tabs || [];
+      const secList = tabs[0]?.tabRenderer?.content?.sectionListRenderer?.contents || [];
+
+      for (const sec of secList) {
+        const carousel = sec.musicCarouselShelfRenderer || sec.musicShelfRenderer || {};
+        const title =
+          carousel.header?.musicCarouselShelfBasicHeaderRenderer?.title?.runs?.[0]?.text || '';
+        const items = carousel.contents || [];
+        const titleLower = title.toLowerCase();
+
+        // New Releases (Albums & Singles - Match exact user screenshot)
+        if (
+          titleLower.includes('lanzamientos') ||
+          titleLower.includes('nuevos') ||
+          titleLower.includes('álbumes')
+        ) {
+          for (const it of items) {
+            const item = it.musicTwoRowItemRenderer;
+            if (!item) continue;
+            const albumTitle = item.title?.runs?.[0]?.text;
+            const subtitleRuns = item.subtitle?.runs || [];
+            const artist = subtitleRuns.map((r) => r.text).join('');
+            const thumb =
+              item.thumbnailRenderer?.musicThumbnailRenderer?.thumbnail?.thumbnails?.slice(-1)[0]
+                ?.url;
+            const browseId = item.navigationEndpoint?.browseEndpoint?.browseId;
+            const videoId = item.navigationEndpoint?.watchEndpoint?.videoId;
+
+            if (albumTitle) {
+              result.newReleases.push({
+                title: albumTitle,
+                artist: artist || 'Nuevo Lanzamiento',
+                thumbnail: thumb,
+                browseId,
+                videoId,
+              });
+            }
           }
         }
-      }
 
-      // 2. New Releases (Albums & Singles)
-      else if (
-        titleLower.includes('lanzamientos') ||
-        titleLower.includes('nuevos') ||
-        titleLower.includes('álbumes')
-      ) {
-        for (const it of items) {
-          const item = it.musicTwoRowItemRenderer;
-          if (!item) continue;
-          const albumTitle = item.title?.runs?.[0]?.text;
-          const artist = item.subtitle?.runs?.[0]?.text;
-          const thumb =
-            item.thumbnailRenderer?.musicThumbnailRenderer?.thumbnail?.thumbnails?.slice(-1)[0]
-              ?.url;
-          const browseId = item.navigationEndpoint?.browseEndpoint?.browseId;
-          const videoId = item.navigationEndpoint?.watchEndpoint?.videoId;
+        // Trending / Videos Musicales Nuevos
+        else if (
+          titleLower.includes('tendencias') ||
+          titleLower.includes('trending') ||
+          titleLower.includes('videos')
+        ) {
+          for (const it of items) {
+            const item = it.musicResponsiveListItemRenderer || it.musicTwoRowItemRenderer;
+            if (!item) continue;
 
-          if (albumTitle) {
-            result.newReleases.push({
-              title: albumTitle,
-              artist: artist || 'Nuevo Lanzamiento',
-              thumbnail: thumb,
-              browseId,
-              videoId,
-            });
+            const songTitle =
+              item.flexColumns?.[0]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]
+                ?.text || item.title?.runs?.[0]?.text;
+            const artist =
+              item.flexColumns?.[1]?.musicResponsiveListItemFlexColumnRenderer?.text?.runs?.[0]
+                ?.text || item.subtitle?.runs?.[0]?.text;
+            const thumb =
+              item.thumbnail?.musicThumbnailRenderer?.thumbnail?.thumbnails?.slice(-1)[0]?.url ||
+              item.thumbnailRenderer?.musicThumbnailRenderer?.thumbnail?.thumbnails?.slice(-1)[0]
+                ?.url;
+            const videoId =
+              item.overlay?.musicItemThumbnailOverlayRenderer?.content?.musicPlayButtonRenderer
+                ?.playNavigationEndpoint?.watchEndpoint?.videoId ||
+              item.navigationEndpoint?.watchEndpoint?.videoId;
+
+            if (songTitle && videoId) {
+              result.trending.push({
+                title: songTitle,
+                artist: artist || 'Artista Destacado',
+                videoId,
+                thumbnail: thumb || `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+              });
+            }
           }
         }
-      }
 
-      // 3. Moods & Genres categories
-      else if (
-        titleLower.includes('ánimo') ||
-        titleLower.includes('géneros') ||
-        titleLower.includes('moods')
-      ) {
-        for (const it of items) {
-          const btn = it.musicNavigationButtonRenderer;
-          if (!btn) continue;
-          const moodTitle = btn.buttonText?.runs?.[0]?.text;
-          const browseId = btn.clickCommand?.browseEndpoint?.browseId;
-          const params = btn.clickCommand?.browseEndpoint?.params;
+        // Moods & Genres categories
+        else if (
+          titleLower.includes('ánimo') ||
+          titleLower.includes('géneros') ||
+          titleLower.includes('moods')
+        ) {
+          for (const it of items) {
+            const btn = it.musicNavigationButtonRenderer;
+            if (!btn) continue;
+            const moodTitle = btn.buttonText?.runs?.[0]?.text;
+            const browseId = btn.clickCommand?.browseEndpoint?.browseId;
+            const params = btn.clickCommand?.browseEndpoint?.params;
 
-          if (moodTitle) {
-            result.moodsAndGenres.push({
-              title: moodTitle,
-              browseId,
-              params,
-            });
+            if (moodTitle) {
+              result.moodsAndGenres.push({
+                title: moodTitle,
+                browseId,
+                params,
+              });
+            }
           }
         }
       }
@@ -152,7 +203,7 @@ async function getExploreData() {
     return result;
   } catch (error) {
     console.error('[Aura YTM] Error fetching explore data:', error);
-    return { trending: [], newReleases: [], moodsAndGenres: [] };
+    return { topSongs: [], trending: [], newReleases: [], moodsAndGenres: [] };
   }
 }
 
@@ -359,9 +410,75 @@ async function getUserWatchLater(sess) {
   }
 }
 
+/**
+ * Fetches user profile info (name, handle/email, avatar) from YouTube Music session cookies
+ */
+async function getUserProfile(sess) {
+  try {
+    const cookieHeader = await getCookieHeaderFromSession(sess);
+    if (!cookieHeader) return { loggedIn: false };
+
+    return new Promise((resolve) => {
+      const postData = JSON.stringify({
+        context: {
+          client: {
+            clientName: 'WEB_REMIX',
+            clientVersion: '1.20241020.01.00',
+            hl: 'es-419',
+            gl: 'PE',
+          },
+        },
+      });
+
+      const req = https.request(
+        'https://music.youtube.com/youtubei/v1/account/account_menu?alt=json',
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent':
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            Cookie: cookieHeader,
+          },
+        },
+        (res) => {
+          let b = '';
+          res.on('data', (c) => (b += c));
+          res.on('end', () => {
+            try {
+              const data = JSON.parse(b);
+              const active =
+                data.actions?.[0]?.openPopupAction?.popup?.multiPageMenuRenderer?.header
+                  ?.activeAccountHeaderRenderer;
+              if (active) {
+                const name = active.accountName?.runs?.[0]?.text || 'Usuario';
+                const email =
+                  active.email?.runs?.[0]?.text || active.channelHandle?.runs?.[0]?.text || '';
+                const avatar = active.accountPhoto?.thumbnails?.slice(-1)[0]?.url || '';
+                return resolve({ loggedIn: true, name, email, avatar });
+              }
+              resolve({ loggedIn: false });
+            } catch (e) {
+              resolve({ loggedIn: false });
+            }
+          });
+        }
+      );
+
+      req.on('error', () => resolve({ loggedIn: false }));
+      req.write(postData);
+      req.end();
+    });
+  } catch (e) {
+    return { loggedIn: false };
+  }
+}
+
 module.exports = {
   getExploreData,
   getCategoryTracks,
   getUserLikedMusic,
   getUserWatchLater,
+  getUserProfile,
+  getCookieHeaderFromSession,
 };

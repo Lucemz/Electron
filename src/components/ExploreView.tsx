@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Song, ExploreData, ExploreItem, MoodCategory } from '../types';
+import { Song, ExploreData, ExploreItem, MoodCategory, TopSongItem } from '../types';
 import {
   Compass,
   Flame,
@@ -52,7 +52,10 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
 }) => {
   const [exploreData, setExploreData] = useState<ExploreData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [selectedCategory, setSelectedCategory] = useState<{ title: string; items: ExploreItem[] } | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState<{
+    title: string;
+    items: ExploreItem[];
+  } | null>(null);
   const [isLoadingCategory, setIsLoadingCategory] = useState(false);
 
   const fetchExplore = async () => {
@@ -73,7 +76,30 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
     fetchExplore();
   }, []);
 
-  const convertExploreItemToSong = (item: ExploreItem, reason = 'Explorar de YouTube Music'): Song => {
+  const convertTopSongToSong = (top: TopSongItem): Song => {
+    const cleanTitle = cleanSongTitle(top.title, top.artist);
+    const cleanArtist = cleanArtistName(top.artist, top.title);
+
+    return {
+      id: `${top.videoId}-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      title: cleanTitle,
+      artist: cleanArtist,
+      videoId: top.videoId,
+      thumbnail: top.thumbnail || `https://img.youtube.com/vi/${top.videoId}/hqdefault.jpg`,
+      duration: 210,
+      durationFormatted: '3:30',
+      aiReason: `Ranking #${top.rank} en Top Songs de YouTube Music`,
+      bpm: 110,
+      energy: 'medium',
+      isLiked: likedSongIds.has(top.videoId),
+      isSavedWatchLater: watchLaterSongIds.has(top.videoId),
+    };
+  };
+
+  const convertExploreItemToSong = (
+    item: ExploreItem,
+    reason = 'Explorar de YouTube Music'
+  ): Song => {
     const videoId = item.videoId || 'dQw4w9WgXcQ';
     const cleanTitle = cleanSongTitle(item.title, item.artist);
     const cleanArtist = cleanArtistName(item.artist || 'Artista Destacado', item.title);
@@ -97,7 +123,6 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
   // Click on Mood or New Release Album
   const handleSelectMoodOrAlbum = async (title: string, browseId?: string, params?: string) => {
     if (!browseId && !params) {
-      // Trigger AI DJ if no browseId
       if (onAskDjWithVibe) onAskDjWithVibe(`Música para ${title}`);
       return;
     }
@@ -133,7 +158,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
               </span>
             </h1>
             <p className="text-xs text-aura-subtext">
-              Tendencias mundiales, nuevos lanzamientos y categorías sonoras de YouTube Music.
+              Top canciones, nuevos lanzamientos y categorías sonoras oficiales de YouTube Music.
             </p>
           </div>
         </div>
@@ -141,7 +166,7 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
         <button
           onClick={fetchExplore}
           disabled={isLoading}
-          className="p-2 text-aura-subtext hover:text-white rounded-xl hover:bg-white/5 transition border border-white/10"
+          className="p-2 text-aura-subtext hover:text-white rounded-xl hover:bg-white/5 transition border border-white/10 cursor-pointer"
           title="Actualizar catálogo"
         >
           <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-aura-accent' : ''}`} />
@@ -151,8 +176,12 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
       {isLoading ? (
         <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
           <Loader2 className="w-8 h-8 text-aura-neonCyan animate-spin mb-3" />
-          <p className="text-sm font-medium text-white">Conectando con el catálogo de YouTube Music...</p>
-          <p className="text-xs text-aura-subtext mt-1">Cargando listas de éxitos y nuevos lanzamientos oficiales</p>
+          <p className="text-sm font-medium text-white">
+            Conectando con el catálogo de YouTube Music...
+          </p>
+          <p className="text-xs text-aura-subtext mt-1">
+            Cargando ranking de canciones y nuevos lanzamientos
+          </p>
         </div>
       ) : selectedCategory ? (
         /* Sub-View: Detailed Category / Album Tracks */
@@ -206,7 +235,11 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                   >
                     <div className="flex items-center gap-3 min-w-0 flex-1">
                       <div className="relative w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 bg-black">
-                        <img src={item.thumbnail} alt={item.title} className="w-full h-full object-cover" />
+                        <img
+                          src={item.thumbnail}
+                          alt={item.title}
+                          className="w-full h-full object-cover"
+                        />
                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
                           <Play className="w-4 h-4 text-white fill-white" />
                         </div>
@@ -227,7 +260,9 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                             onToggleLike(convertExploreItemToSong(item));
                           }}
                           className={`p-1.5 rounded-lg hover:bg-white/10 transition ${
-                            isLiked ? 'text-aura-neonPink fill-aura-neonPink' : 'text-aura-subtext hover:text-white'
+                            isLiked
+                              ? 'text-aura-neonPink fill-aura-neonPink'
+                              : 'text-aura-subtext hover:text-white'
                           }`}
                           title="Me gusta"
                         >
@@ -239,7 +274,9 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                             onToggleWatchLater(convertExploreItemToSong(item));
                           }}
                           className={`p-1.5 rounded-lg hover:bg-white/10 transition ${
-                            isWatchLater ? 'text-aura-neonCyan' : 'text-aura-subtext hover:text-white'
+                            isWatchLater
+                              ? 'text-aura-neonCyan'
+                              : 'text-aura-subtext hover:text-white'
                           }`}
                           title="Ver más tarde"
                         >
@@ -264,27 +301,186 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
           )}
         </div>
       ) : (
-        /* Main Explore Hub */
-        <div className="space-y-8 animate-in fade-in duration-300">
-          {/* SECTION 1: Moods & Genres (Ánimo y géneros) */}
+        /* Main Explore Hub matching exact YouTube Music web structure */
+        <div className="space-y-9 animate-in fade-in duration-300">
+          {/* SECTION 1: Álbumes y sencillos nuevos (Horizontal Cards Carousel) */}
+          {exploreData?.newReleases && exploreData.newReleases.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold tracking-wide text-white uppercase font-mono flex items-center gap-2">
+                  <Disc className="w-4 h-4 text-purple-400" />
+                  <span>Álbumes y sencillos nuevos</span>
+                </h2>
+                <span className="text-xs text-aura-subtext">
+                  {exploreData.newReleases.length} lanzamientos
+                </span>
+              </div>
+
+              <div className="flex gap-4 overflow-x-auto pb-3 scrollbar-thin">
+                {exploreData.newReleases.slice(0, 16).map((item, idx) => (
+                  <div
+                    key={`${item.browseId || item.title}-${idx}`}
+                    className="group flex-shrink-0 w-36 sm:w-40 flex flex-col p-2.5 rounded-2xl bg-white/[0.02] hover:bg-white/[0.08] border border-white/5 hover:border-white/15 transition cursor-pointer"
+                    onClick={() => handleSelectMoodOrAlbum(item.title, item.browseId)}
+                  >
+                    <div className="relative aspect-square w-full rounded-xl overflow-hidden bg-black shadow-lg mb-2.5">
+                      <img
+                        src={item.thumbnail}
+                        alt={item.title}
+                        className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+                      />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                        <Play className="w-6 h-6 text-white fill-white shadow-neon" />
+                      </div>
+                    </div>
+
+                    <p className="text-xs font-semibold text-white truncate group-hover:text-aura-accent transition">
+                      {item.title}
+                    </p>
+                    <p className="text-[11px] text-aura-subtext truncate mt-0.5">{item.artist}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* SECTION 2: Top songs (Canciones más populares - Layout 3 Columnas exactamente como la web) */}
+          {exploreData?.topSongs && exploreData.topSongs.length > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2.5">
+                  <h2 className="text-lg font-bold tracking-tight text-white flex items-center gap-2">
+                    <span>Top songs</span>
+                  </h2>
+                  <span className="text-[10px] bg-white/10 text-aura-subtext px-2 py-0.5 rounded-full font-mono uppercase">
+                    Perú
+                  </span>
+                </div>
+                <button
+                  onClick={() => {
+                    const first = exploreData.topSongs[0];
+                    if (first) {
+                      onPlaySong(convertTopSongToSong(first));
+                    }
+                  }}
+                  className="text-xs text-aura-accent hover:text-white transition flex items-center gap-1.5 cursor-pointer bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-1 rounded-full"
+                >
+                  <Play className="w-3 h-3 fill-current" />
+                  <span>Reproducir todas</span>
+                </button>
+              </div>
+
+              {/* Grid of Top Songs (3 Columns x 4 items) */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2">
+                {exploreData.topSongs.slice(0, 15).map((top) => {
+                  const isLiked = likedSongIds.has(top.videoId);
+                  const isWatchLater = watchLaterSongIds.has(top.videoId);
+                  const asSong = convertTopSongToSong(top);
+
+                  return (
+                    <div
+                      key={top.videoId}
+                      onClick={() => onPlaySong(asSong)}
+                      className="group flex items-center gap-3 p-2 rounded-xl bg-white/[0.02] hover:bg-white/[0.08] border border-white/5 hover:border-white/15 transition cursor-pointer"
+                    >
+                      {/* Rank Number */}
+                      <span className="w-5 text-center text-xs font-bold text-aura-subtext group-hover:text-white font-mono flex-shrink-0">
+                        {top.rank}
+                      </span>
+
+                      {/* Thumbnail */}
+                      <div className="relative w-11 h-11 rounded-lg overflow-hidden flex-shrink-0 bg-black shadow-sm">
+                        <img
+                          src={top.thumbnail}
+                          alt={top.title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition"
+                        />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
+                          <Play className="w-4 h-4 text-white fill-white" />
+                        </div>
+                      </div>
+
+                      {/* Song Title & Artist */}
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs font-semibold text-white truncate group-hover:text-aura-accent transition">
+                          {top.title}
+                        </div>
+                        <div className="text-[11px] text-aura-subtext truncate mt-0.5">
+                          {top.artist}
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleLike(asSong);
+                          }}
+                          className={`p-1.5 rounded-lg hover:bg-white/10 transition ${
+                            isLiked
+                              ? 'text-aura-neonPink fill-aura-neonPink'
+                              : 'text-aura-subtext hover:text-white'
+                          }`}
+                          title="Me gusta"
+                        >
+                          <Heart className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleWatchLater(asSong);
+                          }}
+                          className={`p-1.5 rounded-lg hover:bg-white/10 transition ${
+                            isWatchLater
+                              ? 'text-aura-neonCyan'
+                              : 'text-aura-subtext hover:text-white'
+                          }`}
+                          title="Ver más tarde"
+                        >
+                          <Clock className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onAddSongToQueue(asSong);
+                          }}
+                          className="p-1.5 text-aura-subtext hover:text-white hover:bg-white/10 rounded-lg transition"
+                          title="Añadir a la cola"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* SECTION 3: Estados de ánimo y géneros (Moods & Genres) */}
           {exploreData?.moodsAndGenres && exploreData.moodsAndGenres.length > 0 && (
             <div>
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-semibold tracking-wide text-white uppercase font-mono flex items-center gap-2">
                   <Sparkles className="w-4 h-4 text-aura-neonCyan" />
-                  <span>Ánimo y Géneros Musicales</span>
+                  <span>Estados de ánimo y géneros</span>
                 </h2>
-                <span className="text-xs text-aura-subtext">{exploreData.moodsAndGenres.length} categorías</span>
+                <span className="text-xs text-aura-subtext">
+                  {exploreData.moodsAndGenres.length} categorías
+                </span>
               </div>
 
-              <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-none">
+              <div className="flex gap-2.5 overflow-x-auto pb-2 scrollbar-none">
                 {exploreData.moodsAndGenres.map((mood) => {
                   const gradient = MOOD_GRADIENTS[mood.title] || MOOD_GRADIENTS.default;
 
                   return (
                     <button
                       key={mood.title}
-                      onClick={() => handleSelectMoodOrAlbum(mood.title, mood.browseId, mood.params)}
+                      onClick={() =>
+                        handleSelectMoodOrAlbum(mood.title, mood.browseId, mood.params)
+                      }
                       className={`flex-shrink-0 px-4 py-2.5 rounded-2xl bg-gradient-to-br ${gradient} border text-xs font-semibold tracking-wide hover:scale-105 transition-all shadow-glass flex items-center gap-2 cursor-pointer`}
                     >
                       <span>{mood.title}</span>
@@ -296,24 +492,14 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
             </div>
           )}
 
-          {/* SECTION 2: Tendencias de YouTube Music (Trending) */}
+          {/* SECTION 4: Tendencias / Videos musicales */}
           {exploreData?.trending && exploreData.trending.length > 0 && (
             <div>
               <div className="flex items-center justify-between mb-3">
                 <h2 className="text-sm font-semibold tracking-wide text-white uppercase font-mono flex items-center gap-2">
                   <Flame className="w-4 h-4 text-amber-400" />
-                  <span>Tendencias en YouTube Music</span>
+                  <span>Videos que son tendencia</span>
                 </h2>
-                <button
-                  onClick={() => {
-                    const first = exploreData.trending[0];
-                    if (first?.videoId) onPlaySong(convertExploreItemToSong(first, 'Tendencias'));
-                  }}
-                  className="text-xs text-aura-accent hover:text-white transition flex items-center gap-1 cursor-pointer"
-                >
-                  <Play className="w-3 h-3 fill-current" />
-                  <span>Reproducir todas</span>
-                </button>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -325,10 +511,16 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                     <div
                       key={item.videoId || idx}
                       className="group relative flex items-center gap-3 p-2.5 rounded-2xl bg-white/[0.03] hover:bg-white/[0.08] border border-white/5 hover:border-white/15 transition cursor-pointer"
-                      onClick={() => onPlaySong(convertExploreItemToSong(item, 'Tendencias YouTube Music'))}
+                      onClick={() =>
+                        onPlaySong(convertExploreItemToSong(item, 'Tendencias YouTube Music'))
+                      }
                     >
                       <div className="relative w-14 h-14 rounded-xl overflow-hidden flex-shrink-0 bg-black shadow-md">
-                        <img src={item.thumbnail} alt={item.title} className="w-full h-full object-cover group-hover:scale-110 transition duration-300" />
+                        <img
+                          src={item.thumbnail}
+                          alt={item.title}
+                          className="w-full h-full object-cover group-hover:scale-110 transition duration-300"
+                        />
                         <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
                           <Play className="w-5 h-5 text-white fill-white" />
                         </div>
@@ -351,7 +543,9 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                             onToggleLike(convertExploreItemToSong(item));
                           }}
                           className={`p-1.5 rounded-lg hover:bg-white/10 transition ${
-                            isLiked ? 'text-aura-neonPink fill-aura-neonPink' : 'text-aura-subtext hover:text-white'
+                            isLiked
+                              ? 'text-aura-neonPink fill-aura-neonPink'
+                              : 'text-aura-subtext hover:text-white'
                           }`}
                           title="Me gusta"
                         >
@@ -363,7 +557,9 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                             onToggleWatchLater(convertExploreItemToSong(item));
                           }}
                           className={`p-1.5 rounded-lg hover:bg-white/10 transition ${
-                            isWatchLater ? 'text-aura-neonCyan' : 'text-aura-subtext hover:text-white'
+                            isWatchLater
+                              ? 'text-aura-neonCyan'
+                              : 'text-aura-subtext hover:text-white'
                           }`}
                           title="Ver más tarde"
                         >
@@ -373,45 +569,6 @@ export const ExploreView: React.FC<ExploreViewProps> = ({
                     </div>
                   );
                 })}
-              </div>
-            </div>
-          )}
-
-          {/* SECTION 3: Nuevos Lanzamientos (New Releases) */}
-          {exploreData?.newReleases && exploreData.newReleases.length > 0 && (
-            <div>
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-sm font-semibold tracking-wide text-white uppercase font-mono flex items-center gap-2">
-                  <Disc className="w-4 h-4 text-purple-400" />
-                  <span>Álbumes y Singles Nuevos</span>
-                </h2>
-                <span className="text-xs text-aura-subtext">{exploreData.newReleases.length} lanzamientos</span>
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-                {exploreData.newReleases.slice(0, 12).map((item, idx) => (
-                  <div
-                    key={`${item.browseId || item.title}-${idx}`}
-                    className="group flex flex-col p-2.5 rounded-2xl bg-white/[0.02] hover:bg-white/[0.08] border border-white/5 hover:border-white/15 transition cursor-pointer"
-                    onClick={() => handleSelectMoodOrAlbum(item.title, item.browseId)}
-                  >
-                    <div className="relative aspect-square w-full rounded-xl overflow-hidden bg-black shadow-lg mb-2">
-                      <img
-                        src={item.thumbnail}
-                        alt={item.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-                      />
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition">
-                        <Play className="w-6 h-6 text-white fill-white shadow-neon" />
-                      </div>
-                    </div>
-
-                    <p className="text-xs font-semibold text-white truncate group-hover:text-aura-accent transition">
-                      {item.title}
-                    </p>
-                    <p className="text-[11px] text-aura-subtext truncate mt-0.5">{item.artist}</p>
-                  </div>
-                ))}
               </div>
             </div>
           )}

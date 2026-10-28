@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Song, PlaybackState, ChatMessage, CurationSettings } from './types';
+import { Song, PlaybackState, ChatMessage, CurationSettings, UserProfile } from './types';
 import {
   getAiCuratedPlaylist,
   getSmartSkipRecommendations,
@@ -27,7 +27,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { AiDjChatSidebar } from './components/AiDjChatSidebar';
 import { ExploreView } from './components/ExploreView';
 import { LibraryView } from './components/LibraryView';
-import { Sparkles, Radio, MessageSquare, Compass, Heart, Clock, Music2 } from 'lucide-react';
+import { Sparkles, Radio, MessageSquare, Compass, Heart, Clock, Music2, User } from 'lucide-react';
 
 const STORAGE_LAST_PLAYED = 'aura_last_played_song';
 const SILENT_AUDIO_URI = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQQAAACAgICA';
@@ -67,6 +67,7 @@ export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'player' | 'explore' | 'liked' | 'watchLater'>('player');
   const [likedSongs, setLikedSongs] = useState<Song[]>([]);
   const [watchLaterSongs, setWatchLaterSongs] = useState<Song[]>([]);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
 
   // Conversational DJ State & Curation Settings
   const [isDjChatOpen, setIsDjChatOpen] = useState(false);
@@ -277,7 +278,7 @@ export const App: React.FC = () => {
     setQueue((prev) => [...prev, song]);
   }, []);
 
-  // Library Refresh Engine
+  // Library & Profile Refresh Engine
   const refreshLibrary = useCallback(async () => {
     try {
       const [liked, wl] = await Promise.all([
@@ -289,18 +290,29 @@ export const App: React.FC = () => {
     } catch (e) {}
   }, []);
 
+  const refreshProfile = useCallback(async () => {
+    if (window.auraAPI?.getUserProfile) {
+      try {
+        const p = await window.auraAPI.getUserProfile();
+        setUserProfile(p);
+      } catch (e) {}
+    }
+  }, []);
+
   useEffect(() => {
     refreshLibrary();
-  }, [refreshLibrary]);
+    refreshProfile();
+  }, [refreshLibrary, refreshProfile]);
 
   useEffect(() => {
     if (!window.auraAPI?.onAuthSuccess) return;
     const unreg = window.auraAPI.onAuthSuccess(() => {
-      console.log('[App] Auth success detected, refreshing library...');
+      console.log('[App] Auth success detected, refreshing library and profile...');
       refreshLibrary();
+      refreshProfile();
     });
     return () => unreg();
-  }, [refreshLibrary]);
+  }, [refreshLibrary, refreshProfile]);
 
   const likedSongIds = React.useMemo(() => new Set(likedSongs.map((s) => s.videoId)), [likedSongs]);
   const watchLaterSongIds = React.useMemo(() => new Set(watchLaterSongs.map((s) => s.videoId)), [watchLaterSongs]);
@@ -542,24 +554,10 @@ export const App: React.FC = () => {
         return;
       }
 
-      // Space: Toggle Play / Pause
+      // Space: Toggle Play / Pause (when not typing)
       if (e.code === 'Space') {
         e.preventDefault();
         handleTogglePlayRef.current();
-        return;
-      }
-
-      // Cmd+Right or Ctrl+Right: Next Track
-      if ((e.metaKey || e.ctrlKey) && e.code === 'ArrowRight') {
-        e.preventDefault();
-        handleNextRef.current();
-        return;
-      }
-
-      // Cmd+Left or Ctrl+Left: Previous Track
-      if ((e.metaKey || e.ctrlKey) && e.code === 'ArrowLeft') {
-        e.preventDefault();
-        handlePreviousRef.current();
         return;
       }
 
@@ -775,6 +773,29 @@ export const App: React.FC = () => {
               >
                 <MessageSquare className="w-3.5 h-3.5 text-aura-neonCyan" />
                 <span>DJ Chat</span>
+              </button>
+
+              {/* User Account / Profile Pill */}
+              <button
+                onClick={() => setIsSettingsOpen(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-white/10 bg-white/5 hover:bg-white/10 text-xs text-white transition cursor-pointer"
+                title={userProfile?.loggedIn ? `Conectado como ${userProfile.name}` : 'Ajustes y cuenta'}
+              >
+                {userProfile?.loggedIn && userProfile.avatar ? (
+                  <img
+                    src={userProfile.avatar}
+                    alt={userProfile.name}
+                    className="w-4 h-4 rounded-full object-cover"
+                  />
+                ) : (
+                  <User className="w-3.5 h-3.5 text-aura-subtext" />
+                )}
+                <span className="max-w-[80px] truncate text-[11px] font-medium">
+                  {userProfile?.loggedIn ? userProfile.name : 'Cuenta'}
+                </span>
+                {userProfile?.loggedIn && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                )}
               </button>
             </div>
           </header>

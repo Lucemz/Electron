@@ -8,6 +8,8 @@ const {
   getCategoryTracks,
   getUserLikedMusic,
   getUserWatchLater,
+  getUserProfile,
+  getCookieHeaderFromSession,
 } = require('./youtubeMusic.cjs');
 
 // Bypass Chromium's autoplay policy for seamless background/instant playback
@@ -21,8 +23,36 @@ let mainWindow = null;
 let isMiniPlayer = false;
 let previousBounds = null;
 let staticServer = null;
+let serverPort = 0;
 
 const SESSION_PARTITION = 'persist:aura-user-session';
+
+async function applyCookiesToSession(cookieString, sess) {
+  if (!cookieString || typeof cookieString !== 'string') return false;
+  const pairs = cookieString.split(';');
+  for (const pair of pairs) {
+    const trimmed = pair.trim();
+    if (!trimmed) continue;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx === -1) continue;
+    const name = trimmed.slice(0, eqIdx).trim();
+    const value = trimmed.slice(eqIdx + 1).trim();
+    try {
+      await sess.cookies.set({
+        url: 'https://music.youtube.com',
+        domain: '.youtube.com',
+        name,
+        value,
+        path: '/',
+        secure: true,
+        httpOnly: false,
+      });
+    } catch (e) {
+      // Ignore malformed individual cookie
+    }
+  }
+  return true;
+}
 
 // Anti-compilation and non-music regex to filter out mixes, albums, tutorials, and gear sales
 const NON_MUSIC_REGEX =
@@ -101,7 +131,14 @@ async function createWindow() {
   }
   console.log('[Aura Main] Using dist path:', distPath);
 
-  const { port, server } = await startStaticServer(distPath);
+  const { port, server } = await startStaticServer(distPath, async (cookies) => {
+    console.log('[Aura Main] Cookies received from browser sync endpoint!');
+    await applyCookiesToSession(cookies, sess);
+    if (mainWindow) {
+      mainWindow.webContents.send('auth:success');
+    }
+  });
+  serverPort = port;
   staticServer = server;
   const localUrl = `http://localhost:${port}`;
   console.log(`[Aura Main] Loading local application at ${localUrl}`);
@@ -112,8 +149,23 @@ async function createWindow() {
     if (staticServer) staticServer.close();
   });
 
-  // Register Mac Media Keys & Global Shortcuts
+  // Register Mac Media Keys & Function Keys F7, F8, F9 (Strictly no Shift+Arrows)
   try {
+    // 1. Physical Mac Top Function Keys
+    const f7Ok = globalShortcut.register('F7', () => {
+      console.log('[Aura Main] F7 pressed -> Previous Track');
+      if (mainWindow) mainWindow.webContents.send('player:previous');
+    });
+    const f8Ok = globalShortcut.register('F8', () => {
+      console.log('[Aura Main] F8 pressed -> Toggle Play/Pause');
+      if (mainWindow) mainWindow.webContents.send('player:toggle-play');
+    });
+    const f9Ok = globalShortcut.register('F9', () => {
+      console.log('[Aura Main] F9 pressed -> Next Track');
+      if (mainWindow) mainWindow.webContents.send('player:next');
+    });
+
+    // 2. Hardware media keys
     const playOk = globalShortcut.register('MediaPlayPause', () => {
       console.log('[Aura Main] MediaPlayPause pressed');
       if (mainWindow) mainWindow.webContents.send('player:toggle-play');
@@ -126,20 +178,14 @@ async function createWindow() {
       console.log('[Aura Main] MediaPreviousTrack pressed');
       if (mainWindow) mainWindow.webContents.send('player:previous');
     });
-    console.log('[Aura Main] Hardware media shortcuts registered:', { playOk, nextOk, prevOk });
 
-    // Secondary global shortcuts that always succeed on macOS without special permissions
-    globalShortcut.register('CommandOrControl+Shift+Space', () => {
-      console.log('[Aura Main] Global Cmd+Shift+Space pressed');
-      if (mainWindow) mainWindow.webContents.send('player:toggle-play');
-    });
-    globalShortcut.register('CommandOrControl+Shift+Right', () => {
-      console.log('[Aura Main] Global Cmd+Shift+Right pressed');
-      if (mainWindow) mainWindow.webContents.send('player:next');
-    });
-    globalShortcut.register('CommandOrControl+Shift+Left', () => {
-      console.log('[Aura Main] Global Cmd+Shift+Left pressed');
-      if (mainWindow) mainWindow.webContents.send('player:previous');
+    console.log('[Aura Main] Shortcuts active: F7/F8/F9 & Hardware media keys:', {
+      f7Ok,
+      f8Ok,
+      f9Ok,
+      playOk,
+      nextOk,
+      prevOk,
     });
   } catch (err) {
     console.warn('[Aura Main] Could not register media shortcuts:', err);
@@ -206,7 +252,9 @@ ipcMain.handle('youtube:search-multiple', async (_, query, limit = 8) => {
 
 // YouTube Music Explore & Personalized Library Endpoints
 ipcMain.handle('youtube:get-explore', async () => {
-  return await getExploreData();
+  const sess = session.fromPartition(SESSION_PARTITION);
+  const cookieHeader = await getCookieHeaderFromSession(sess);
+  return await getExploreData(cookieHeader);
 });
 
 ipcMain.handle('youtube:get-category', async (_, browseId, params) => {
@@ -223,37 +271,68 @@ ipcMain.handle('youtube:get-user-watch-later', async () => {
   return await getUserWatchLater(sess);
 });
 
-// Official Google / YouTube Login Modal (No 400 error, supports Passkeys / Google prompt)
+// Profile status (Google / YouTube Music account)
+ipcMain.handle('auth:get-profile', async () => {
+  const sess = session.fromPartition(SESSION_PARTITION);
+  return await getUserProfile(sess);
+});
+
+// Open external browser login sync helper (Seamless login via user's default browser)
+ipcMain.handle('auth:open-browser-login', async () => {
+  if (serverPort) {
+    const url = `http://localhost:${serverPort}/sync-login`;
+    console.log('[Aura Auth] Opening system browser for sync:', url);
+    await shell.openExternal(url);
+    return true;
+  }
+  return false;
+});
+
+// Save session cookies directly
+ipcMain.handle('auth:save-cookies', async (_, cookieStr) => {
+  const sess = session.fromPartition(SESSION_PARTITION);
+  const ok = await applyCookiesToSession(cookieStr, sess);
+  if (ok && mainWindow) {
+    mainWindow.webContents.send('auth:success');
+  }
+  return ok;
+});
+
+// Direct YouTube Login Window (Safe navigation directly to music.youtube.com)
 ipcMain.handle('auth:open-google-login', async () => {
+  // First attempt: Open user's default browser (as requested: "siempre es con el navegador")
+  if (serverPort) {
+    const url = `http://localhost:${serverPort}/sync-login`;
+    console.log('[Aura Auth] Opening browser login sync:', url);
+    await shell.openExternal(url);
+    return true;
+  }
+
   return new Promise((resolve) => {
     const loginWin = new BrowserWindow({
-      width: 520,
-      height: 680,
+      width: 800,
+      height: 700,
       parent: mainWindow || undefined,
       modal: true,
-      title: 'Iniciar sesión en YouTube',
+      title: 'YouTube Music - Inicio de Sesión',
       backgroundColor: '#0a0a0f',
       webPreferences: {
-        partition: SESSION_PARTITION, // Shares session cookies with the player!
+        partition: SESSION_PARTITION,
       },
     });
 
-    // Use modern Chrome desktop user-agent to bypass Google's "insecure browser" screen
     loginWin.webContents.setUserAgent(
       'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
     );
 
-    // Official Google URL with valid continue parameter to prevent HTTP 400 malformed error
-    const googleLoginUrl =
-      'https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fmusic.youtube.com';
+    loginWin.loadURL('https://music.youtube.com');
 
-    loginWin.loadURL(googleLoginUrl);
-
-    loginWin.webContents.on('did-navigate', (_, url) => {
+    loginWin.webContents.on('did-navigate', async (_, url) => {
       console.log('[Aura Auth] Navigated to:', url);
-      // Once user successfully authenticates, Google redirects to music.youtube.com
-      if (url.includes('music.youtube.com') || url.includes('youtube.com/signin?action_handle')) {
-        console.log('[Aura Auth] Google login detected! Storing cookies and closing.');
+      const sess = session.fromPartition(SESSION_PARTITION);
+      const profile = await getUserProfile(sess);
+      if (profile && profile.loggedIn) {
+        console.log('[Aura Auth] Google login detected! User:', profile.name);
         if (mainWindow) {
           mainWindow.webContents.send('auth:success');
         }

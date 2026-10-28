@@ -79,6 +79,14 @@ export interface UserTasteProfile {
   totalPlays: number;
 }
 
+export interface TopSongItem {
+  rank: number;
+  title: string;
+  artist: string;
+  videoId: string;
+  thumbnail: string;
+}
+
 export interface ExploreItem {
   videoId?: string;
   title: string;
@@ -95,9 +103,17 @@ export interface MoodCategory {
 }
 
 export interface ExploreData {
+  topSongs: TopSongItem[];
   trending: ExploreItem[];
   newReleases: ExploreItem[];
   moodsAndGenres: MoodCategory[];
+}
+
+export interface UserProfile {
+  loggedIn: boolean;
+  name?: string;
+  email?: string;
+  avatar?: string;
 }
 
 export interface AuraAPI {
@@ -116,7 +132,10 @@ export interface AuraAPI {
   getYouTubeCategory: (browseId: string, params?: string) => Promise<ExploreItem[]>;
   getUserLikedMusic: () => Promise<Song[]>;
   getUserWatchLater: () => Promise<Song[]>;
+  getUserProfile: () => Promise<UserProfile>;
   openGoogleLogin: () => Promise<boolean>;
+  openBrowserLogin: () => Promise<boolean>;
+  saveCookies: (cookieStr: string) => Promise<boolean>;
   toggleMiniPlayer: () => Promise<boolean>;
   isMiniPlayer: () => Promise<boolean>;
   minimizeWindow: () => Promise<void>;

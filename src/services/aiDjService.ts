@@ -3,6 +3,8 @@ import { getTasteContextForPrompt, recordDislikedSong } from './tasteProfileServ
 import { cleanSongTitle, cleanArtistName, isSameOrSimilarSong } from '../utils/textCleaner';
 
 const STORAGE_KEY_API_KEY = 'aura_gemini_api_key';
+const STORAGE_KEY_MODEL = 'aura_gemini_model';
+const STORAGE_KEY_THINKING = 'aura_gemini_thinking_budget';
 
 export function getStoredApiKey(): string {
   return localStorage.getItem(STORAGE_KEY_API_KEY) || import.meta.env.VITE_GEMINI_API_KEY || '';
@@ -13,6 +15,46 @@ export function saveStoredApiKey(key: string): void {
     localStorage.setItem(STORAGE_KEY_API_KEY, key.trim());
   } else {
     localStorage.removeItem(STORAGE_KEY_API_KEY);
+  }
+}
+
+export function getStoredModel(): string {
+  return localStorage.getItem(STORAGE_KEY_MODEL) || 'gemini-2.5-flash';
+}
+
+export function saveStoredModel(model: string): void {
+  localStorage.setItem(STORAGE_KEY_MODEL, model);
+}
+
+export function getStoredThinkingBudget(): number {
+  const val = localStorage.getItem(STORAGE_KEY_THINKING);
+  if (val === null) return 2048; // Default: Moderate reasoning
+  return parseInt(val, 10);
+}
+
+export function saveStoredThinkingBudget(budget: number): void {
+  localStorage.setItem(STORAGE_KEY_THINKING, budget.toString());
+}
+
+/**
+ * Validates Gemini API Key by checking available models from Google AI Studio
+ */
+export async function validateGeminiApiKey(
+  key: string
+): Promise<{ valid: boolean; error?: string }> {
+  const cleanKey = key?.trim();
+  if (!cleanKey) return { valid: false, error: 'Ingresa una clave para verificar' };
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${cleanKey}`
+    );
+    if (res.ok) {
+      return { valid: true };
+    }
+    const data = await res.json().catch(() => ({}));
+    return { valid: false, error: data.error?.message || 'Clave de Google Gemini inválida' };
+  } catch (err: any) {
+    return { valid: false, error: err.message || 'Error de conexión con Google' };
   }
 }
 
@@ -55,14 +97,24 @@ Devuelve ÚNICAMENTE un array JSON válido (sin markdown ni comillas triples) co
   }
 ]`;
 
+      const model = getStoredModel();
+      const thinkingBudget = getStoredThinkingBudget();
+      const genConfig: any = {
+        temperature: 0.75,
+        responseMimeType: 'application/json',
+      };
+      if (thinkingBudget > 0 && (model.includes('2.5') || model.includes('2.0'))) {
+        genConfig.thinkingConfig = { thinkingBudget };
+      }
+
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: { temperature: 0.75, responseMimeType: 'application/json' },
+            generationConfig: genConfig,
           }),
         }
       );
@@ -186,17 +238,24 @@ Escribe tu comentario conversacional (2-3 frases), y luego escribe EXACTAMENTE e
         },
       ];
 
+      const model = getStoredModel();
+      const thinkingBudget = getStoredThinkingBudget();
+      const genConfig: any = {
+        temperature: 0.75,
+      };
+      if (thinkingBudget > 0 && (model.includes('2.5') || model.includes('2.0'))) {
+        genConfig.thinkingConfig = { thinkingBudget };
+      }
+
       const res = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             contents,
             systemInstruction: { parts: [{ text: systemInstruction }] },
-            generationConfig: {
-              temperature: 0.75,
-            },
+            generationConfig: genConfig,
           }),
         }
       );
