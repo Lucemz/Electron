@@ -135,6 +135,7 @@ export interface AuraAPI {
   getUserProfile: () => Promise<UserProfile>;
   openGoogleLogin: () => Promise<boolean>;
   openBrowserLogin: () => Promise<boolean>;
+  logout: () => Promise<boolean>;
   saveCookies: (cookieStr: string) => Promise<boolean>;
   toggleMiniPlayer: () => Promise<boolean>;
   isMiniPlayer: () => Promise<boolean>;

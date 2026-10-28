@@ -23,6 +23,7 @@ import {
   Cpu,
   BrainCircuit,
   UserCheck,
+  RefreshCw,
 } from 'lucide-react';
 
 interface SettingsModalProps {
@@ -44,7 +45,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   // Account & Profile State
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [isOpeningBrowser, setIsOpeningBrowser] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [showWebSync, setShowWebSync] = useState(false);
 
   const checkToken = useCallback(async (keyToCheck: string) => {
     if (!keyToCheck.trim()) {
@@ -88,6 +90,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     if (!window.auraAPI?.onAuthSuccess) return;
     const unbind = window.auraAPI.onAuthSuccess(() => {
       loadProfile();
+      setIsLoggingIn(false);
     });
     return () => unbind();
   }, [loadProfile]);
@@ -104,14 +107,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     }, 800);
   };
 
-  const handleBrowserLogin = async () => {
-    setIsOpeningBrowser(true);
-    if (window.auraAPI?.openBrowserLogin) {
-      await window.auraAPI.openBrowserLogin();
-    } else if (window.auraAPI?.openGoogleLogin) {
+  const handleDirectLogin = async () => {
+    setIsLoggingIn(true);
+    if (window.auraAPI?.openGoogleLogin) {
       await window.auraAPI.openGoogleLogin();
     }
-    setTimeout(() => setIsOpeningBrowser(false), 2000);
+    setIsLoggingIn(false);
+  };
+
+  const handleLogout = async () => {
+    if (window.auraAPI?.logout) {
+      await window.auraAPI.logout();
+      setUserProfile(null);
+    }
+  };
+
+  const handleBrowserLogin = async () => {
+    if (window.auraAPI?.openBrowserLogin) {
+      await window.auraAPI.openBrowserLogin();
+    }
   };
 
   return (
@@ -156,48 +170,100 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
           </div>
 
           {/* User Profile Card if logged in */}
-          {userProfile?.loggedIn && (
-            <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl p-3">
-              {userProfile.avatar ? (
-                <img
-                  src={userProfile.avatar}
-                  alt={userProfile.name}
-                  className="w-10 h-10 rounded-full object-cover border border-white/20"
-                />
-              ) : (
-                <div className="w-10 h-10 rounded-full bg-aura-accent/20 flex items-center justify-center text-aura-accent">
-                  <UserCheck className="w-5 h-5" />
-                </div>
-              )}
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-semibold text-white truncate">{userProfile.name}</div>
-                {userProfile.email && (
-                  <div className="text-xs text-aura-subtext truncate">{userProfile.email}</div>
+          {userProfile?.loggedIn ? (
+            <div className="space-y-3">
+              <div className="flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl p-3">
+                {userProfile.avatar ? (
+                  <img
+                    src={userProfile.avatar}
+                    alt={userProfile.name}
+                    className="w-10 h-10 rounded-full object-cover border border-white/20"
+                  />
+                ) : (
+                  <div className="w-10 h-10 rounded-full bg-aura-accent/20 flex items-center justify-center text-aura-accent">
+                    <UserCheck className="w-5 h-5" />
+                  </div>
                 )}
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-semibold text-white truncate">
+                    {userProfile.name}
+                  </div>
+                  {userProfile.email && (
+                    <div className="text-xs text-aura-subtext truncate">{userProfile.email}</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleDirectLogin}
+                  disabled={isLoggingIn}
+                  className="flex-1 py-2 px-3 bg-white/10 hover:bg-white/15 border border-white/10 text-white text-xs font-semibold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${isLoggingIn ? 'animate-spin' : ''}`} />
+                  <span>Cambiar cuenta</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="py-2 px-3 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/20 text-rose-300 text-xs font-semibold rounded-xl transition cursor-pointer"
+                >
+                  Cerrar sesión
+                </button>
               </div>
             </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-xs text-aura-subtext leading-relaxed">
+                Inicia sesión con tu cuenta de YouTube / Google para sincronizar tus me gusta y ver más tarde. Admite notificación al móvil o Touch ID sin necesidad de escribir contraseñas.
+              </p>
+
+              <button
+                type="button"
+                onClick={handleDirectLogin}
+                disabled={isLoggingIn}
+                className="w-full py-2.5 px-4 bg-aura-accent hover:bg-aura-accent/90 border border-aura-accent/30 text-white text-xs font-semibold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-neon"
+              >
+                {isLoggingIn ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Abriendo acceso oficial de Google...</span>
+                  </>
+                ) : (
+                  <>
+                    <Globe className="w-4 h-4 text-white" />
+                    <span>Iniciar Sesión en YouTube / Google</span>
+                  </>
+                )}
+              </button>
+
+              <div className="pt-0.5 flex items-center justify-between text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => setShowWebSync(!showWebSync)}
+                  className="text-aura-subtext hover:text-white transition cursor-pointer"
+                >
+                  {showWebSync ? 'Ocultar opciones web' : '¿Prefieres vincular con tu navegador Chrome?'}
+                </button>
+              </div>
+
+              {showWebSync && (
+                <div className="p-3 bg-white/[0.03] border border-white/5 rounded-xl space-y-2">
+                  <p className="text-[11px] text-aura-subtext">
+                    Abre YouTube Music en tu navegador habitual y vincula tus cookies directamente:
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleBrowserLogin}
+                    className="w-full py-1.5 px-3 bg-white/10 hover:bg-white/15 border border-white/10 text-white text-xs rounded-lg transition cursor-pointer"
+                  >
+                    Abrir enlace de sincronización en navegador ↗
+                  </button>
+                </div>
+              )}
+            </div>
           )}
-
-          <p className="text-xs text-aura-subtext leading-relaxed">
-            Sincroniza tus canciones favoritas, tu lista de &quot;Ver más tarde&quot; y tu perfil
-            utilizando la sesión que ya tienes activa en tu navegador habitual.
-          </p>
-
-          <button
-            type="button"
-            onClick={handleBrowserLogin}
-            disabled={isOpeningBrowser}
-            className="w-full py-2.5 px-4 bg-white/10 hover:bg-white/20 border border-white/10 text-white text-xs font-semibold rounded-xl transition flex items-center justify-center gap-2 cursor-pointer shadow-sm"
-          >
-            <Globe className="w-4 h-4 text-aura-neonCyan" />
-            <span>
-              {isOpeningBrowser
-                ? 'Abriendo navegador...'
-                : userProfile?.loggedIn
-                ? 'Re-sincronizar con Navegador Web'
-                : 'Iniciar Sesión en el Navegador (Recomendado)'}
-            </span>
-          </button>
 
           <div className="flex items-center gap-2 text-[11px] text-emerald-400/90 pt-1">
             <ShieldCheck className="w-3.5 h-3.5 flex-shrink-0" />

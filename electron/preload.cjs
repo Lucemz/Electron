@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('auraAPI', {
   getUserProfile: () => ipcRenderer.invoke('auth:get-profile'),
   openGoogleLogin: () => ipcRenderer.invoke('auth:open-google-login'),
   openBrowserLogin: () => ipcRenderer.invoke('auth:open-browser-login'),
+  logout: () => ipcRenderer.invoke('auth:logout'),
   saveCookies: (cookieStr) => ipcRenderer.invoke('auth:save-cookies', cookieStr),
   toggleMiniPlayer: () => ipcRenderer.invoke('window:toggle-mini'),
   isMiniPlayer: () => ipcRenderer.invoke('window:is-mini'),

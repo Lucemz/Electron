@@ -93,6 +93,16 @@ async function createWindow() {
       ],
     },
     (details, callback) => {
+      // Do not block authentication, Google accounts, or login resources
+      if (
+        details.url.includes('accounts.google.com') ||
+        details.url.includes('accounts.youtube.com') ||
+        details.url.includes('gstatic.com') ||
+        details.url.includes('signin') ||
+        details.url.includes('ServiceLogin')
+      ) {
+        return callback({ cancel: false });
+      }
       callback({ cancel: true });
     }
   );
@@ -298,36 +308,45 @@ ipcMain.handle('auth:save-cookies', async (_, cookieStr) => {
   return ok;
 });
 
-// Direct YouTube Login Window (Safe navigation directly to music.youtube.com)
+// Clean, Official Google / YouTube Login Window
 ipcMain.handle('auth:open-google-login', async () => {
-  // First attempt: Open user's default browser (as requested: "siempre es con el navegador")
-  if (serverPort) {
-    const url = `http://localhost:${serverPort}/sync-login`;
-    console.log('[Aura Auth] Opening browser login sync:', url);
-    await shell.openExternal(url);
-    return true;
-  }
-
   return new Promise((resolve) => {
     const loginWin = new BrowserWindow({
-      width: 800,
-      height: 700,
+      width: 520,
+      height: 680,
+      center: true,
       parent: mainWindow || undefined,
-      modal: true,
-      title: 'YouTube Music - Inicio de Sesión',
+      modal: false,
+      title: 'Iniciar sesión en YouTube Music / Google',
       backgroundColor: '#0a0a0f',
       webPreferences: {
         partition: SESSION_PARTITION,
+        nodeIntegration: false,
+        contextIsolation: true,
       },
     });
 
-    loginWin.webContents.setUserAgent(
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-    );
+    const CHROME_UA =
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
 
-    loginWin.loadURL('https://music.youtube.com');
+    loginWin.webContents.setUserAgent(CHROME_UA);
 
-    loginWin.webContents.on('did-navigate', async (_, url) => {
+    // Official YouTube sign-in URL with all valid parameters so Google never throws HTTP 400
+    const targetUrl =
+      'https://accounts.google.com/ServiceLogin?service=youtube&uilel=3&passive=true&continue=https%3A%2F%2Fwww.youtube.com%2Fsignin%3Faction_handle_signin%3Dtrue%26app%3Ddesktop%26hl%3Des%26next%3Dhttps%253A%252F%252Fmusic.youtube.com%252F%26feature%3Dsign_in_button&hl=es';
+
+    loginWin.loadURL(targetUrl);
+
+    // Hide navigator.webdriver to pass Google's security checks
+    loginWin.webContents.on('dom-ready', () => {
+      loginWin.webContents.executeJavaScript(`
+        try {
+          Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        } catch (e) {}
+      `);
+    });
+
+    const checkLogin = async (url) => {
       console.log('[Aura Auth] Navigated to:', url);
       const sess = session.fromPartition(SESSION_PARTITION);
       const profile = await getUserProfile(sess);
@@ -339,14 +358,28 @@ ipcMain.handle('auth:open-google-login', async () => {
         setTimeout(() => {
           if (!loginWin.isDestroyed()) loginWin.close();
           resolve(true);
-        }, 1200);
+        }, 1000);
       }
-    });
+    };
+
+    loginWin.webContents.on('did-navigate', (_, url) => checkLogin(url));
+    loginWin.webContents.on('did-redirect-navigation', (_, url) => checkLogin(url));
 
     loginWin.on('closed', () => {
       resolve(true);
     });
   });
+});
+
+// Logout: clears session partition
+ipcMain.handle('auth:logout', async () => {
+  const sess = session.fromPartition(SESSION_PARTITION);
+  await sess.clearStorageData();
+  console.log('[Aura Auth] User logged out. Session cleared.');
+  if (mainWindow) {
+    mainWindow.webContents.send('auth:success');
+  }
+  return true;
 });
 
 ipcMain.handle('window:toggle-mini', async () => {
