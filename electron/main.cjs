@@ -1,0 +1,292 @@
+const { app, BrowserWindow, ipcMain, globalShortcut, shell, session } = require('electron');
+const path = require('path');
+const fs = require('fs');
+const yts = require('yt-search');
+const { startStaticServer } = require('./server.cjs');
+
+// Bypass Chromium's autoplay policy for seamless background/instant playback
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
+app.commandLine.appendSwitch('disable-background-timer-throttling');
+app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
+app.commandLine.appendSwitch('disable-renderer-backgrounding');
+app.commandLine.appendSwitch('enable-features', 'HardwareMediaKeyHandling');
+
+let mainWindow = null;
+let isMiniPlayer = false;
+let previousBounds = null;
+let staticServer = null;
+
+const SESSION_PARTITION = 'persist:aura-user-session';
+
+// Anti-compilation and non-music regex to filter out mixes, albums, tutorials, and gear sales
+const NON_MUSIC_REGEX =
+  /\b(mix|compilation|recopilacion|recopilación|disco completo|full album|en vivo completo|concierto completo|1 hour|1 hora|2 horas|30 min|40 min|50 min|enganchados|megamix|volumen completo|grandes exitos|grandes éxitos|completo|tutorial|como tocar|cómo tocar|venta de|unboxing|review|clases de|aprende a tocar|tienda|comprar)\b/i;
+
+function filterSingles(videos) {
+  const clean = videos.filter((v) => {
+    if (!v.videoId) return false;
+    // Target single song duration: 75 seconds (1:15) to 450 seconds (7:30)
+    if (v.seconds < 75 || v.seconds > 450) return false;
+    if (NON_MUSIC_REGEX.test(v.title)) return false;
+    return true;
+  });
+
+  if (clean.length > 0) {
+    return clean.sort((a, b) => {
+      const aTopic = a.author?.name?.endsWith(' - Topic') ? 1 : 0;
+      const bTopic = b.author?.name?.endsWith(' - Topic') ? 1 : 0;
+      return bTopic - aTopic;
+    });
+  }
+
+  return videos.filter((v) => v.videoId && v.seconds < 500);
+}
+
+async function createWindow() {
+  const sess = session.fromPartition(SESSION_PARTITION);
+
+  // Silent Ad-Blocker: Cancel all ad requests at network level
+  sess.webRequest.onBeforeRequest(
+    {
+      urls: [
+        '*://*.doubleclick.net/*',
+        '*://*.googleads.g.doubleclick.net/*',
+        '*://*.youtube.com/api/stats/ads*',
+        '*://*.youtube.com/pagead/*',
+        '*://*.googlesyndication.com/*',
+      ],
+    },
+    (details, callback) => {
+      callback({ cancel: true });
+    }
+  );
+
+  mainWindow = new BrowserWindow({
+    width: 1140,
+    height: 760,
+    minWidth: 880,
+    minHeight: 620,
+    titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 18, y: 18 },
+    backgroundColor: '#0a0a0f',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      webSecurity: false,
+      backgroundThrottling: false,
+      partition: SESSION_PARTITION,
+    },
+  });
+
+  mainWindow.webContents.on('console-message', (event, level, message) => {
+    console.log('[Renderer UI]', message);
+  });
+
+  let distPath = path.join(__dirname, '../dist');
+  if (app.isPackaged) {
+    const unpackedDist = path.join(process.resourcesPath, 'app.asar.unpacked/dist');
+    const resourcesDist = path.join(process.resourcesPath, 'dist');
+    if (fs.existsSync(unpackedDist)) {
+      distPath = unpackedDist;
+    } else if (fs.existsSync(resourcesDist)) {
+      distPath = resourcesDist;
+    }
+  }
+  console.log('[Aura Main] Using dist path:', distPath);
+
+  const { port, server } = await startStaticServer(distPath);
+  staticServer = server;
+  const localUrl = `http://localhost:${port}`;
+  console.log(`[Aura Main] Loading local application at ${localUrl}`);
+  await mainWindow.loadURL(localUrl);
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+    if (staticServer) staticServer.close();
+  });
+
+  // Register Mac Media Keys & Global Shortcuts
+  try {
+    const playOk = globalShortcut.register('MediaPlayPause', () => {
+      console.log('[Aura Main] MediaPlayPause pressed');
+      if (mainWindow) mainWindow.webContents.send('player:toggle-play');
+    });
+    const nextOk = globalShortcut.register('MediaNextTrack', () => {
+      console.log('[Aura Main] MediaNextTrack pressed');
+      if (mainWindow) mainWindow.webContents.send('player:next');
+    });
+    const prevOk = globalShortcut.register('MediaPreviousTrack', () => {
+      console.log('[Aura Main] MediaPreviousTrack pressed');
+      if (mainWindow) mainWindow.webContents.send('player:previous');
+    });
+    console.log('[Aura Main] Hardware media shortcuts registered:', { playOk, nextOk, prevOk });
+
+    // Secondary global shortcuts that always succeed on macOS without special permissions
+    globalShortcut.register('CommandOrControl+Shift+Space', () => {
+      console.log('[Aura Main] Global Cmd+Shift+Space pressed');
+      if (mainWindow) mainWindow.webContents.send('player:toggle-play');
+    });
+    globalShortcut.register('CommandOrControl+Shift+Right', () => {
+      console.log('[Aura Main] Global Cmd+Shift+Right pressed');
+      if (mainWindow) mainWindow.webContents.send('player:next');
+    });
+    globalShortcut.register('CommandOrControl+Shift+Left', () => {
+      console.log('[Aura Main] Global Cmd+Shift+Left pressed');
+      if (mainWindow) mainWindow.webContents.send('player:previous');
+    });
+  } catch (err) {
+    console.warn('[Aura Main] Could not register media shortcuts:', err);
+  }
+}
+
+// Single YouTube Search: Returns individual studio tracks, discarding mixes/compilations
+ipcMain.handle('youtube:search', async (_, query) => {
+  try {
+    if (!query) return null;
+    console.log('[Aura IPC] Searching YouTube single track for:', query);
+    const r = await yts(query);
+    if (!r || !r.videos || r.videos.length === 0) {
+      console.warn('[Aura IPC] No videos found for:', query);
+      return null;
+    }
+
+    const singles = filterSingles(r.videos);
+    const top = singles[0] || r.videos[0];
+    const alternatives = singles.slice(1, 5).map((v) => v.videoId);
+
+    console.log('[Aura IPC] Selected clean single:', top.title, `(${top.timestamp})`, top.videoId);
+    return {
+      videoId: top.videoId,
+      title: top.title,
+      artist: top.author ? top.author.name : '',
+      duration: top.seconds,
+      durationFormatted: top.timestamp,
+      thumbnail: top.thumbnail || top.image,
+      url: top.url,
+      alternativeVideoIds: alternatives,
+    };
+  } catch (error) {
+    console.error('[Aura IPC] Error searching YouTube:', error);
+    return null;
+  }
+});
+
+// Multi-result Global Search: Returns strictly individual songs for user selection
+ipcMain.handle('youtube:search-multiple', async (_, query, limit = 8) => {
+  try {
+    if (!query) return [];
+    console.log('[Aura IPC] Multi-search singles for:', query);
+    const r = await yts(query);
+    if (!r || !r.videos) return [];
+
+    const singles = filterSingles(r.videos);
+    const pool = singles.length > 0 ? singles : r.videos.filter((v) => v.videoId && v.seconds < 500);
+
+    return pool.slice(0, limit).map((v) => ({
+      videoId: v.videoId,
+      title: v.title,
+      artist: v.author ? v.author.name : '',
+      duration: v.seconds,
+      durationFormatted: v.timestamp,
+      thumbnail: v.thumbnail || v.image,
+      url: v.url,
+    }));
+  } catch (error) {
+    console.error('[Aura IPC] Error searching multiple:', error);
+    return [];
+  }
+});
+
+// Official Google / YouTube Login Modal (No 400 error, supports Passkeys / Google prompt)
+ipcMain.handle('auth:open-google-login', async () => {
+  return new Promise((resolve) => {
+    const loginWin = new BrowserWindow({
+      width: 520,
+      height: 680,
+      parent: mainWindow || undefined,
+      modal: true,
+      title: 'Iniciar sesión en YouTube',
+      backgroundColor: '#0a0a0f',
+      webPreferences: {
+        partition: SESSION_PARTITION, // Shares session cookies with the player!
+      },
+    });
+
+    // Use modern Chrome desktop user-agent to bypass Google's "insecure browser" screen
+    loginWin.webContents.setUserAgent(
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+    );
+
+    // Official Google URL with valid continue parameter to prevent HTTP 400 malformed error
+    const googleLoginUrl =
+      'https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fmusic.youtube.com';
+
+    loginWin.loadURL(googleLoginUrl);
+
+    loginWin.webContents.on('did-navigate', (_, url) => {
+      console.log('[Aura Auth] Navigated to:', url);
+      // Once user successfully authenticates, Google redirects to music.youtube.com
+      if (url.includes('music.youtube.com') || url.includes('youtube.com/signin?action_handle')) {
+        console.log('[Aura Auth] Google login detected! Storing cookies and closing.');
+        if (mainWindow) {
+          mainWindow.webContents.send('auth:success');
+        }
+        setTimeout(() => {
+          if (!loginWin.isDestroyed()) loginWin.close();
+          resolve(true);
+        }, 1200);
+      }
+    });
+
+    loginWin.on('closed', () => {
+      resolve(true);
+    });
+  });
+});
+
+ipcMain.handle('window:toggle-mini', async () => {
+  if (!mainWindow) return false;
+  if (!isMiniPlayer) {
+    previousBounds = mainWindow.getBounds();
+    mainWindow.setAlwaysOnTop(true, 'floating');
+    mainWindow.setResizable(false);
+    mainWindow.setBounds({
+      width: 380,
+      height: 200,
+      x: previousBounds.x + (previousBounds.width - 380),
+      y: previousBounds.y,
+    });
+    isMiniPlayer = true;
+  } else {
+    mainWindow.setAlwaysOnTop(false);
+    mainWindow.setResizable(true);
+    if (previousBounds) {
+      mainWindow.setBounds(previousBounds);
+    } else {
+      mainWindow.setBounds({ width: 1140, height: 760 });
+    }
+    isMiniPlayer = false;
+  }
+  return isMiniPlayer;
+});
+
+ipcMain.handle('window:is-mini', () => isMiniPlayer);
+ipcMain.handle('window:minimize', () => mainWindow?.minimize());
+ipcMain.handle('window:close', () => mainWindow?.close());
+
+app.whenReady().then(createWindow);
+
+app.on('window-all-closed', () => {
+  globalShortcut.unregisterAll();
+  if (staticServer) staticServer.close();
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+  }
+});
