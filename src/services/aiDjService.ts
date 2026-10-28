@@ -1,6 +1,7 @@
 import { AiRecommendation, CurationSettings, Song } from '../types';
 import { getTasteContextForPrompt, recordDislikedSong } from './tasteProfileService';
 import { cleanSongTitle, cleanArtistName, isSameOrSimilarSong } from '../utils/textCleaner';
+import { interpretNaturalLanguageContext } from './semanticContextEngine';
 
 const STORAGE_KEY_API_KEY = 'aura_gemini_api_key';
 const STORAGE_KEY_MODEL = 'aura_gemini_model';
@@ -185,6 +186,87 @@ Devuelve ÚNICAMENTE un array JSON válido (sin markdown ni comillas triples) co
 }
 
 /**
+ * Contextual Prompt-to-Playlist Curator:
+ * UNDERSTANDS NATURAL LANGUAGE CONTEXT (mood, activity, vibe, situation)
+ * and resolves it to REAL tracks by established artists. NEVER matches literal title strings.
+ */
+export async function getAiCuratedPlaylist(
+  userPrompt: string,
+  currentHistory: string[] = [],
+  settings?: CurationSettings
+): Promise<AiRecommendation[]> {
+  const apiKey = getStoredApiKey();
+  const tasteContext = getTasteContextForPrompt(settings);
+
+  // 1. If Gemini API is available, ask Gemini with pure JSON mode & explicit contextual understanding instructions
+  if (apiKey) {
+    try {
+      const prompt = `Actúa como el motor de recomendación e inteligencia musical de Aura Music.
+El oyente te hace una solicitud en LENGUAJE NATURAL: "${userPrompt}".
+${tasteContext}
+
+REGLAS FUNDAMENTALES DE COMPRENSIÓN CONTEXTUAL:
+1. ESTÁ ESTRICTAMENTE PROHIBIDO buscar o inventar títulos que coincidan literalmente con las palabras del usuario.
+2. Tu función es INTERPRETAR la intención, la atmósfera, la energía, la época y el contexto emocional y sonoro de lo que pide (por ejemplo: si pide "música para concentrarme estudiando tarde en la noche", selecciona canciones reales como "Weightless" de Marconi Union, "Resonance" de HOME, etc.).
+3. Genera exactamente entre 5 y 8 canciones REALES, EXISTENTES Y FAMOSAS/RECONOCIDAS de artistas reales.
+4. Si menciona o sugiere un artista (ej. "algo como the weeknd"), incluye temas de ese artista y de artistas afines.
+
+Devuelve ÚNICAMENTE un array JSON válido con la siguiente estructura:
+[
+  {
+    "title": "Título real de la canción",
+    "artist": "Nombre real del artista",
+    "reason": "Por qué encaja con el contexto solicitado",
+    "bpm": 100,
+    "energy": "chill" | "medium" | "high",
+    "subgenre": "Subgénero"
+  }
+]`;
+
+      const model = getStoredModel();
+      const thinkingBudget = getStoredThinkingBudget();
+      const genConfig: any = {
+        temperature: 0.7,
+        responseMimeType: 'application/json',
+      };
+      if (thinkingBudget > 0 && (model.includes('2.5') || model.includes('2.0'))) {
+        genConfig.thinkingConfig = { thinkingBudget };
+      }
+
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: genConfig,
+          }),
+        }
+      );
+
+      if (res.ok) {
+        const data = await res.json();
+        const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (text) {
+          const parsed = JSON.parse(text);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return parsed;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Aura AI] Gemini curated playlist failed, falling back to local semantic engine:', e);
+    }
+  }
+
+  // 2. Offline / Local Semantic Engine Fallback:
+  // Categorizes context and returns real songs without requiring literal matches
+  const semanticResult = await interpretNaturalLanguageContext(userPrompt);
+  return semanticResult.recommendations;
+}
+
+/**
  * Interactive Conversational Chat with Aura DJ
  */
 export async function chatWithAiDj(
@@ -196,7 +278,7 @@ export async function chatWithAiDj(
   const apiKey = getStoredApiKey();
   const tasteContext = getTasteContextForPrompt(settings);
 
-  // If Gemini API key is available, use multi-turn conversational Gemini 1.5 Flash
+  // If Gemini API key is available, use multi-turn conversational Gemini
   if (apiKey) {
     try {
       const systemInstruction = `
@@ -207,19 +289,20 @@ ${tasteContext}
 
 ${currentSong ? `CANCIÓN ACTUAL EN REPRODUCCIÓN: "${currentSong.title}" de ${currentSong.artist}.` : ''}
 
-INSTRUCCIONES CLAVE:
-1. Responde al usuario de manera cálida, inteligente y experta.
-2. Si el usuario te pide cambiar de vibra, quitar canciones comerciales, o enfocarse en un instrumento específico, ajústalo con precisión.
-3. SIEMPRE incluye un bloque JSON al final con exactamente 3 a 5 canciones recomendadas que cumplan con la dirección de la conversación.
+REGLAS FUNDAMENTALES DE COMPRENSIÓN CONTEXTUAL:
+1. El usuario se comunica contigo en LENGUAJE NATURAL. No busques títulos que coincidan literalmente con sus frases; interpreta su estado anímico, actividad, vibra o estilo sonoro.
+2. Traduce su petición a canciones REALES de artistas establecidos que encajen en esa vibra.
+3. Responde al usuario de manera cálida, inteligente y experta (2 o 3 frases).
+4. SIEMPRE incluye al final el bloque JSON con exactamente 3 a 5 canciones recomendadas.
 
 FORMATO OBLIGATORIO DE RESPUESTA:
-Escribe tu comentario conversacional (2-3 frases), y luego escribe EXACTAMENTE este delimitador seguido del JSON:
+Escribe tu comentario conversacional, y luego escribe EXACTAMENTE este delimitador seguido del JSON:
 ---JSON---
 [
   {
     "title": "Nombre de la Canción",
     "artist": "Nombre del Artista",
-    "reason": "Explicación musicológica de timbres, ritmo o armonía",
+    "reason": "Explicación contextual de la selección",
     "bpm": 95,
     "energy": "chill" | "medium" | "high",
     "subgenre": "Subgénero exacto"
@@ -271,19 +354,11 @@ Escribe tu comentario conversacional (2-3 frases), y luego escribe EXACTAMENTE e
   }
 
   // Dynamic Semantic Fallback (Works for any prompt even without an API key)
-  return getDynamicSemanticChat(userMessage, currentSong, settings);
-}
-
-/**
- * Standard Prompt-to-Playlist Curator with Musicology Reasoning
- */
-export async function getAiCuratedPlaylist(
-  userPrompt: string,
-  currentHistory: string[] = [],
-  settings?: CurationSettings
-): Promise<AiRecommendation[]> {
-  const chatRes = await chatWithAiDj(userPrompt, [], null, settings);
-  return chatRes.recommendations;
+  const semanticResult = await interpretNaturalLanguageContext(userMessage);
+  return {
+    commentary: semanticResult.commentary,
+    recommendations: semanticResult.recommendations,
+  };
 }
 
 /**
@@ -337,171 +412,5 @@ function parseDjChatResponse(rawText: string): AiDjChatResponse {
   return {
     commentary: rawText.trim(),
     recommendations: [],
-  };
-}
-
-/**
- * Dynamic Semantic Chat Fallback for offline / zero-key usage
- */
-async function getDynamicSemanticChat(
-  message: string,
-  currentSong: Song | null,
-  settings?: CurationSettings
-): Promise<AiDjChatResponse> {
-  const lower = message.toLowerCase();
-  const obscurity = settings?.obscurityLevel || 'balanced';
-
-  // Andean regional music
-  if (lower.includes('ayacucho') || lower.includes('huayno') || lower.includes('andino')) {
-    let recs: AiRecommendation[];
-    let commentary = 'Excelente elección. Te preparé una selección limpia de maestros de la guitarra y tradición andina.';
-
-    if (obscurity === 'underground') {
-      commentary += ' Activé el modo Caleta con grabaciones íntimas de solistas.';
-      recs = [
-        {
-          title: 'Helme',
-          artist: 'Raúl García Zárate',
-          reason: 'Solo de guitarra tradicional ayacuchana en temple baúl.',
-          bpm: 78,
-          energy: 'chill',
-          subgenre: 'Guitarra Andina',
-        },
-        {
-          title: 'Madre Andina',
-          artist: 'Manuelcha Prado',
-          reason: 'Voz y guitarra acústica tradicional de Puquio.',
-          bpm: 85,
-          energy: 'chill',
-          subgenre: 'Huayno Tradicional',
-        },
-        {
-          title: 'Una Paloma Sobre Una Rama',
-          artist: 'Nancy Manchego y Manuelcha Prado',
-          reason: 'Arpegios andinos limpios y melodía nostálgica.',
-          bpm: 82,
-          energy: 'chill',
-          subgenre: 'Yaraví Tradicional',
-        },
-      ];
-    } else {
-      recs = [
-        {
-          title: 'Adiós Pueblo de Ayacucho',
-          artist: 'Trío Ayacucho',
-          reason: 'El himno tradicional de la guitarra andina.',
-          bpm: 90,
-          energy: 'medium',
-          subgenre: 'Huayno Tradicional',
-        },
-        {
-          title: 'Flor de Retama',
-          artist: 'Yennifer Sermeño',
-          reason: 'Composición clásica de la historia y poesía andina.',
-          bpm: 92,
-          energy: 'medium',
-          subgenre: 'Canción Tradicional',
-        },
-      ];
-    }
-
-    return { commentary, recommendations: recs };
-  }
-
-  // General YouTube Multi-Search Fallback
-  if (window.auraAPI?.searchMultipleYouTube) {
-    try {
-      const searchTerms = `${message} audio`;
-      const results = await window.auraAPI.searchMultipleYouTube(searchTerms, 10);
-
-      if (results && results.length > 0) {
-        const uniqueRecs: AiRecommendation[] = [];
-
-        for (const item of results) {
-          const candidate = {
-            title: cleanSongTitle(item.title, item.artist),
-            artist: cleanArtistName(item.artist, item.title) || item.artist || 'Artista Destacado',
-            videoId: item.videoId,
-          };
-
-          // Discard if similar to any track already in this batch
-          const duplicate = uniqueRecs.some((r) => isSameOrSimilarSong(r, candidate));
-          if (duplicate) continue;
-
-          uniqueRecs.push({
-            title: candidate.title,
-            artist: candidate.artist,
-            reason: `Pista seleccionada para tu vibra.`,
-            bpm: 100,
-            energy: 'medium',
-            subgenre: 'Selección de Estudio',
-          });
-
-          if (uniqueRecs.length >= 5) break;
-        }
-
-        // If the query was a specific single song and we only got 1 unique track (because all others were duplicates of it),
-        // fetch other hits by that same artist to fill the queue with real variety!
-        if (uniqueRecs.length < 5 && uniqueRecs.length > 0) {
-          const mainArtist = uniqueRecs[0].artist;
-          try {
-            const artistHits = await window.auraAPI.searchMultipleYouTube(`${mainArtist} top hits audio`, 8);
-            for (const hit of artistHits) {
-              const candidate = {
-                title: cleanSongTitle(hit.title, hit.artist),
-                artist: cleanArtistName(hit.artist, hit.title) || mainArtist,
-                videoId: hit.videoId,
-              };
-
-              const duplicate = uniqueRecs.some((r) => isSameOrSimilarSong(r, candidate));
-              if (duplicate) continue;
-
-              uniqueRecs.push({
-                title: candidate.title,
-                artist: candidate.artist,
-                reason: `Éxito de ${mainArtist} para enriquecer la estación.`,
-                bpm: 100,
-                energy: 'medium',
-                subgenre: 'Selección de Estudio',
-              });
-
-              if (uniqueRecs.length >= 5) break;
-            }
-          } catch (e) {}
-        }
-
-        if (uniqueRecs.length > 0) {
-          return {
-            commentary: `Curando pistas de alta calidad para "${message}".`,
-            recommendations: uniqueRecs,
-          };
-        }
-      }
-    } catch (e) {
-      console.warn('Fallback search failed:', e);
-    }
-  }
-
-  // Fallback
-  return {
-    commentary: 'Ajusté los ritmos para una experiencia auditiva fluida.',
-    recommendations: [
-      {
-        title: 'Yellow',
-        artist: 'Coldplay',
-        reason: 'Guitarras acústicas y melodía expansiva.',
-        bpm: 88,
-        energy: 'medium',
-        subgenre: 'Alternative Rock',
-      },
-      {
-        title: 'Get Lucky',
-        artist: 'Daft Punk',
-        reason: 'Groove de bajo y guitarra funk.',
-        bpm: 116,
-        energy: 'high',
-        subgenre: 'Funk / Electronic',
-      },
-    ],
   };
 }

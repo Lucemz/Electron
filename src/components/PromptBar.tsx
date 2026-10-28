@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Sparkles, Search, Play, Plus, X, Loader2, ArrowRight, Clock } from 'lucide-react';
+import { Sparkles, Search, Play, Plus, X, Loader2, Clock, BrainCircuit } from 'lucide-react';
 import { SearchResultItem, Song } from '../types';
 import { cleanSongTitle, cleanArtistName } from '../utils/textCleaner';
 
@@ -11,6 +11,14 @@ interface PromptBarProps {
   isLoading: boolean;
   aiProgressStep?: string | null;
 }
+
+const NATURAL_KEYWORDS = [
+  'para', 'algo', 'quiero', 'como', 'estilo', 'tipo', 'vibra', 'vibe', 'momento',
+  'triste', 'desamor', 'llorar', 'estudiar', 'concentrar', 'programar', 'dormir',
+  'relajar', 'gym', 'entrenar', 'fiesta', 'perreo', 'bailar', 'manejar', 'noche',
+  'caleta', 'buena', 'buenas', 'rolitas', 'rolita', 'musica', 'canciones', 'cancion',
+  'bajon', 'recuerdo', 'parecido', 'tranqui', 'motiva', 'pesado', 'viaje', 'carretera',
+];
 
 export const PromptBar: React.FC<PromptBarProps> = ({
   onPromptSubmit,
@@ -38,6 +46,18 @@ export const PromptBar: React.FC<PromptBarProps> = ({
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // Detect whether current query is a natural language sentence
+  const isNaturalLanguage = (text: string): boolean => {
+    const clean = text.toLowerCase().trim();
+    const words = clean.split(/\s+/);
+    if (words.length >= 3) {
+      return NATURAL_KEYWORDS.some((kw) => clean.includes(kw));
+    }
+    return false;
+  };
+
+  const isNaturalQuery = isNaturalLanguage(input);
 
   // Handle Search Input in direct search mode
   const handleDirectSearch = async (query: string) => {
@@ -78,12 +98,29 @@ export const PromptBar: React.FC<PromptBarProps> = ({
     e.preventDefault();
     if (!input.trim()) return;
 
+    // If user is in search mode but typed natural language, seamlessly route to AI Curador
+    if (mode === 'search' && isNaturalQuery) {
+      setMode('ai');
+      setShowResults(false);
+      onPromptSubmit(input.trim());
+      setInput('');
+      return;
+    }
+
     if (mode === 'ai') {
       onPromptSubmit(input.trim());
       setInput('');
     } else {
       handleDirectSearch(input.trim());
     }
+  };
+
+  const triggerCurateFromSearch = () => {
+    if (!input.trim()) return;
+    setMode('ai');
+    setShowResults(false);
+    onPromptSubmit(input.trim());
+    setInput('');
   };
 
   const convertSearchResultToSong = (item: SearchResultItem): Song => ({
@@ -117,7 +154,7 @@ export const PromptBar: React.FC<PromptBarProps> = ({
           }`}
         >
           <Sparkles className="w-3.5 h-3.5" />
-          <span>AI DJ Curador</span>
+          <span>Buscador IA (Contextual)</span>
         </button>
 
         <button
@@ -133,7 +170,7 @@ export const PromptBar: React.FC<PromptBarProps> = ({
           }`}
         >
           <Search className="w-3.5 h-3.5" />
-          <span>Buscador de Pistas (Singles)</span>
+          <span>Pista Exacta (Singles)</span>
         </button>
       </div>
 
@@ -162,9 +199,9 @@ export const PromptBar: React.FC<PromptBarProps> = ({
             placeholder={
               mode === 'ai'
                 ? isLoading
-                  ? 'Aura DJ está procesando...'
-                  : 'Pide al AI DJ por vibra o contexto: "guitarras andinas solistas", "rock clásico caleta", "synthwave 80s"...'
-                : 'Busca canciones individuales (sin recopilaciones ni mixes)...'
+                  ? 'Aura IA está analizando el contexto y seleccionando canciones...'
+                  : 'Escribe en lenguaje natural: "música para concentrarme", "algo triste de desamor", "reggaeton viejo"...'
+                : 'Escribe el nombre exacto de la canción o artista...'
             }
             className="w-full bg-transparent text-sm sm:text-base text-white placeholder-aura-subtext focus:outline-none"
           />
@@ -191,7 +228,7 @@ export const PromptBar: React.FC<PromptBarProps> = ({
             {isSearching ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
             ) : mode === 'ai' ? (
-              <span>Curar</span>
+              <span>Curar con IA</span>
             ) : (
               <span>Buscar</span>
             )}
@@ -199,6 +236,14 @@ export const PromptBar: React.FC<PromptBarProps> = ({
           </button>
         </div>
       </form>
+
+      {/* Subtext info pill clarifying Contextual Understanding */}
+      {mode === 'ai' && !aiProgressStep && (
+        <div className="flex items-center gap-1.5 text-[11px] text-aura-subtext/80 px-2">
+          <BrainCircuit className="w-3 h-3 text-aura-accent" />
+          <span>Entiende estados de ánimo, situaciones y vibras sin exigir títulos literales.</span>
+        </div>
+      )}
 
       {/* Live AI Processing Indicator Ticker */}
       {aiProgressStep && (
@@ -211,6 +256,25 @@ export const PromptBar: React.FC<PromptBarProps> = ({
       {/* Global Search Results Dropdown (Clean singles only) */}
       {mode === 'search' && showResults && (
         <div className="w-full bg-aura-surface/95 backdrop-blur-2xl border border-white/15 rounded-2xl shadow-2xl p-2 z-50 max-h-96 overflow-y-auto space-y-1 mt-1 animate-in fade-in duration-200">
+          {/* Smart Contextual Suggestion Banner */}
+          {isNaturalQuery && (
+            <div className="flex items-center justify-between p-2.5 mb-2 bg-aura-accent/15 border border-aura-accent/30 rounded-xl">
+              <div className="flex items-center gap-2 min-w-0">
+                <Sparkles className="w-4 h-4 text-aura-accent flex-shrink-0 animate-pulse" />
+                <span className="text-xs text-white truncate">
+                  Detectamos una vibra o contexto: <strong>"{input}"</strong>
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={triggerCurateFromSearch}
+                className="px-3 py-1 bg-aura-accent hover:bg-aura-accent/90 text-white text-xs font-semibold rounded-lg shadow-neon flex-shrink-0 cursor-pointer transition"
+              >
+                Curar con IA
+              </button>
+            </div>
+          )}
+
           <div className="flex items-center justify-between px-3 py-1.5 text-[11px] font-mono text-aura-subtext border-b border-white/5 mb-1">
             <span>Pistas individuales encontradas (sin recopilaciones)</span>
             {isSearching && <span className="text-aura-accent animate-pulse">Buscando...</span>}
@@ -218,7 +282,18 @@ export const PromptBar: React.FC<PromptBarProps> = ({
 
           {searchResults.length === 0 && !isSearching && (
             <div className="p-4 text-center text-xs text-aura-subtext">
-              No se encontraron pistas individuales. Intenta con otro término o artista.
+              No se encontraron pistas individuales para este término exacto.
+              {isNaturalQuery && (
+                <div className="mt-2">
+                  <button
+                    type="button"
+                    onClick={triggerCurateFromSearch}
+                    className="text-aura-accent underline hover:text-white"
+                  >
+                    Haz clic aquí para que la IA interprete este contexto musical
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
