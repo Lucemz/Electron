@@ -10,6 +10,9 @@ import { resolveSongFromYouTube } from './services/youtubeService';
 import {
   getUserTasteProfile,
   toggleLikeSong,
+  toggleWatchLaterSong,
+  getCombinedLikedSongs,
+  getCombinedWatchLater,
   recordPlayedSong,
   getCurationSettings,
   saveCurationSettings,
@@ -22,7 +25,9 @@ import { PlayerControls } from './components/PlayerControls';
 import { MiniPlayerView } from './components/MiniPlayerView';
 import { SettingsModal } from './components/SettingsModal';
 import { AiDjChatSidebar } from './components/AiDjChatSidebar';
-import { Sparkles, Radio, MessageSquare } from 'lucide-react';
+import { ExploreView } from './components/ExploreView';
+import { LibraryView } from './components/LibraryView';
+import { Sparkles, Radio, MessageSquare, Compass, Heart, Clock, Music2 } from 'lucide-react';
 
 const STORAGE_LAST_PLAYED = 'aura_last_played_song';
 const SILENT_AUDIO_URI = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQQAAACAgICA';
@@ -57,6 +62,11 @@ export const App: React.FC = () => {
   const [isMiniPlayer, setIsMiniPlayer] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [showVideo, setShowVideo] = useState(false);
+
+  // Top View Navigation: Player | Explore | Liked | Watch Later
+  const [activeTab, setActiveTab] = useState<'player' | 'explore' | 'liked' | 'watchLater'>('player');
+  const [likedSongs, setLikedSongs] = useState<Song[]>([]);
+  const [watchLaterSongs, setWatchLaterSongs] = useState<Song[]>([]);
 
   // Conversational DJ State & Curation Settings
   const [isDjChatOpen, setIsDjChatOpen] = useState(false);
@@ -267,14 +277,76 @@ export const App: React.FC = () => {
     setQueue((prev) => [...prev, song]);
   }, []);
 
-  // Toggle Like on song (Trains user taste profile)
+  // Library Refresh Engine
+  const refreshLibrary = useCallback(async () => {
+    try {
+      const [liked, wl] = await Promise.all([
+        getCombinedLikedSongs(),
+        getCombinedWatchLater(),
+      ]);
+      setLikedSongs(liked);
+      setWatchLaterSongs(wl);
+    } catch (e) {}
+  }, []);
+
+  useEffect(() => {
+    refreshLibrary();
+  }, [refreshLibrary]);
+
+  useEffect(() => {
+    if (!window.auraAPI?.onAuthSuccess) return;
+    const unreg = window.auraAPI.onAuthSuccess(() => {
+      console.log('[App] Auth success detected, refreshing library...');
+      refreshLibrary();
+    });
+    return () => unreg();
+  }, [refreshLibrary]);
+
+  const likedSongIds = React.useMemo(() => new Set(likedSongs.map((s) => s.videoId)), [likedSongs]);
+  const watchLaterSongIds = React.useMemo(() => new Set(watchLaterSongs.map((s) => s.videoId)), [watchLaterSongs]);
+
+  // Toggle Like on song (Trains user taste profile & library)
   const handleToggleLike = useCallback((song: Song) => {
     const { isLiked } = toggleLikeSong(song);
     setCurrentSong((prev) => (prev && prev.videoId === song.videoId ? { ...prev, isLiked } : prev));
     setQueue((prev) =>
       prev.map((s) => (s.videoId === song.videoId ? { ...s, isLiked } : s))
     );
-  }, []);
+    refreshLibrary();
+  }, [refreshLibrary]);
+
+  // Toggle Watch Later on song
+  const handleToggleWatchLater = useCallback((song: Song) => {
+    const { isSaved } = toggleWatchLaterSong(song);
+    setCurrentSong((prev) => (prev && prev.videoId === song.videoId ? { ...prev, isSavedWatchLater: isSaved } : prev));
+    setQueue((prev) =>
+      prev.map((s) => (s.videoId === song.videoId ? { ...s, isSavedWatchLater: isSaved } : s))
+    );
+    refreshLibrary();
+  }, [refreshLibrary]);
+
+  // Play all songs from library
+  const handlePlayAll = useCallback((songs: Song[]) => {
+    if (!songs || songs.length === 0) return;
+    const [first, ...rest] = songs;
+    recordPlayedSong(first);
+    setCurrentSong(first);
+    setQueue(rest);
+    setPlaybackState((p) => ({ ...p, isPlaying: true, currentTime: 0 }));
+    populateSimilarRadio(first);
+  }, [populateSimilarRadio]);
+
+  // Shuffle all songs from library
+  const handleShuffleAll = useCallback((songs: Song[]) => {
+    if (!songs || songs.length === 0) return;
+    const shuffled = [...songs].sort(() => Math.random() - 0.5);
+    const [first, ...rest] = shuffled;
+    recordPlayedSong(first);
+    setCurrentSong(first);
+    setQueue(rest);
+    setPlaybackState((p) => ({ ...p, isPlaying: true, currentTime: 0 }));
+    populateSimilarRadio(first);
+  }, [populateSimilarRadio]);
 
   // History stack for Previous Track playback
   const playedStackRef = useRef<Song[]>([]);
@@ -623,6 +695,67 @@ export const App: React.FC = () => {
               </div>
             </div>
 
+            {/* Navigation Tabs Center */}
+            <div className="flex items-center gap-1 bg-white/5 p-1 rounded-xl border border-white/10 mac-no-drag">
+              <button
+                onClick={() => setActiveTab('player')}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition cursor-pointer ${
+                  activeTab === 'player'
+                    ? 'bg-aura-accent text-white shadow-neon'
+                    : 'text-aura-subtext hover:text-white hover:bg-white/5'
+                }`}
+              >
+                <Music2 className="w-3.5 h-3.5" />
+                <span>Reproductor</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('explore')}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition cursor-pointer ${
+                  activeTab === 'explore'
+                    ? 'bg-aura-accent text-white shadow-neon'
+                    : 'text-aura-subtext hover:text-white hover:bg-white/5'
+                }`}
+              >
+                <Compass className="w-3.5 h-3.5" />
+                <span>Explorar</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('liked')}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition cursor-pointer ${
+                  activeTab === 'liked'
+                    ? 'bg-aura-accent text-white shadow-neon'
+                    : 'text-aura-subtext hover:text-white hover:bg-white/5'
+                }`}
+              >
+                <Heart className="w-3.5 h-3.5" />
+                <span>Me Gusta</span>
+                {likedSongs.length > 0 && (
+                  <span className="text-[10px] bg-white/20 px-1.5 py-0.2 rounded-full font-mono">
+                    {likedSongs.length}
+                  </span>
+                )}
+              </button>
+
+              <button
+                onClick={() => setActiveTab('watchLater')}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition cursor-pointer ${
+                  activeTab === 'watchLater'
+                    ? 'bg-aura-accent text-white shadow-neon'
+                    : 'text-aura-subtext hover:text-white hover:bg-white/5'
+                }`}
+              >
+                <Clock className="w-3.5 h-3.5" />
+                <span>Ver Más Tarde</span>
+                {watchLaterSongs.length > 0 && (
+                  <span className="text-[10px] bg-white/20 px-1.5 py-0.2 rounded-full font-mono">
+                    {watchLaterSongs.length}
+                  </span>
+                )}
+              </button>
+            </div>
+
             <div className="flex items-center gap-3 mac-no-drag">
               <div className="text-xs text-aura-subtext/70 flex items-center gap-1.5">
                 <Sparkles className="w-3 h-3 text-aura-neonCyan" />
@@ -648,63 +781,120 @@ export const App: React.FC = () => {
 
           {/* Main Body */}
           <main className="flex-1 flex flex-col overflow-hidden relative">
-            {/* Top Prompt & Global Search Area */}
-            <div className="w-full px-6 pt-3 pb-2 z-30 max-w-4xl mx-auto">
-              <PromptBar
-                onPromptSubmit={handlePromptSubmit}
-                onPlayDirectSong={handlePlayDirectSong}
-                onAddSongToQueue={handleAddSongToQueue}
-                isLoading={isLoadingAi}
-                aiProgressStep={aiProgressStep}
-              />
+            {/* Player View (Kept active in DOM with offscreen positioning when not active to preserve gapless audio engine) */}
+            <div
+              className={`flex-1 flex flex-col overflow-hidden ${
+                activeTab === 'player'
+                  ? 'relative'
+                  : 'absolute -left-[9999px] -top-[9999px] w-full h-full pointer-events-none opacity-0'
+              }`}
+            >
+              {/* Top Prompt & Global Search Area */}
+              <div className="w-full px-6 pt-3 pb-2 z-30 max-w-4xl mx-auto">
+                <PromptBar
+                  onPromptSubmit={handlePromptSubmit}
+                  onPlayDirectSong={handlePlayDirectSong}
+                  onAddSongToQueue={handleAddSongToQueue}
+                  isLoading={isLoadingAi}
+                  aiProgressStep={aiProgressStep}
+                />
+              </div>
+
+              {/* Center Area: Now Playing & Queue + DJ Chat Sidebar */}
+              <div className="flex-1 flex overflow-hidden">
+                <NowPlayingView
+                  currentSong={currentSong}
+                  isPlaying={playbackState.isPlaying}
+                  showVideo={showVideo}
+                  onToggleVideo={() => setShowVideo(!showVideo)}
+                  onSmartSkip={handleSmartSkip}
+                  onToggleLike={handleToggleLike}
+                  onToggleWatchLater={handleToggleWatchLater}
+                  onToggleDjChat={() => setIsDjChatOpen(!isDjChatOpen)}
+                  isAiLoading={isLoadingAi}
+                  videoSlot={persistentPlayer}
+                />
+
+                <QueueList
+                  queue={queue}
+                  onPlaySong={(index) => {
+                    const song = queue[index];
+                    const newQueue = queue.filter((_, i) => i !== index);
+                    if (currentSong) newQueue.unshift(currentSong);
+                    recordPlayedSong(song);
+                    setCurrentSong(song);
+                    setQueue(newQueue);
+                    setPlaybackState((p) => ({ ...p, isPlaying: true, currentTime: 0 }));
+                    // Refresh radio with tracks similar to the selected track!
+                    populateSimilarRadio(song);
+                  }}
+                  onRemoveSong={(index) => {
+                    setQueue((prev) => prev.filter((_, i) => i !== index));
+                  }}
+                  onToggleWatchLater={handleToggleWatchLater}
+                  isLoadingAi={isLoadingAi}
+                />
+
+                {/* Interactive Conversational DJ Sidebar */}
+                <AiDjChatSidebar
+                  isOpen={isDjChatOpen}
+                  onClose={() => setIsDjChatOpen(false)}
+                  messages={chatMessages}
+                  onSendMessage={handleSendMessageToDj}
+                  onPlaySong={handlePlayDirectSong}
+                  curationSettings={curationSettings}
+                  onUpdateSettings={setCurationSettings}
+                  isLoading={isLoadingAi}
+                  currentSong={currentSong}
+                />
+              </div>
             </div>
 
-            {/* Center Area: Now Playing & Queue + DJ Chat Sidebar */}
-            <div className="flex-1 flex overflow-hidden">
-              <NowPlayingView
-                currentSong={currentSong}
-                isPlaying={playbackState.isPlaying}
-                showVideo={showVideo}
-                onToggleVideo={() => setShowVideo(!showVideo)}
-                onSmartSkip={handleSmartSkip}
-                onToggleLike={handleToggleLike}
-                onToggleDjChat={() => setIsDjChatOpen(!isDjChatOpen)}
-                isAiLoading={isLoadingAi}
-                videoSlot={persistentPlayer}
-              />
-
-              <QueueList
-                queue={queue}
-                onPlaySong={(index) => {
-                  const song = queue[index];
-                  const newQueue = queue.filter((_, i) => i !== index);
-                  if (currentSong) newQueue.unshift(currentSong);
-                  recordPlayedSong(song);
-                  setCurrentSong(song);
-                  setQueue(newQueue);
-                  setPlaybackState((p) => ({ ...p, isPlaying: true, currentTime: 0 }));
-                  // Refresh radio with tracks similar to the selected track!
-                  populateSimilarRadio(song);
-                }}
-                onRemoveSong={(index) => {
-                  setQueue((prev) => prev.filter((_, i) => i !== index));
-                }}
-                isLoadingAi={isLoadingAi}
-              />
-
-              {/* Interactive Conversational DJ Sidebar */}
-              <AiDjChatSidebar
-                isOpen={isDjChatOpen}
-                onClose={() => setIsDjChatOpen(false)}
-                messages={chatMessages}
-                onSendMessage={handleSendMessageToDj}
+            {/* Explore Hub Tab */}
+            {activeTab === 'explore' && (
+              <ExploreView
                 onPlaySong={handlePlayDirectSong}
-                curationSettings={curationSettings}
-                onUpdateSettings={setCurationSettings}
-                isLoading={isLoadingAi}
-                currentSong={currentSong}
+                onAddSongToQueue={handleAddSongToQueue}
+                onToggleLike={handleToggleLike}
+                onToggleWatchLater={handleToggleWatchLater}
+                onAskDjWithVibe={(vibe) => {
+                  setActiveTab('player');
+                  handlePromptSubmit(vibe);
+                }}
+                likedSongIds={likedSongIds}
+                watchLaterSongIds={watchLaterSongIds}
               />
-            </div>
+            )}
+
+            {/* Liked Songs Library Tab */}
+            {activeTab === 'liked' && (
+              <LibraryView
+                type="liked"
+                songs={likedSongs}
+                onPlaySong={handlePlayDirectSong}
+                onPlayAll={handlePlayAll}
+                onShuffleAll={handleShuffleAll}
+                onAddSongToQueue={handleAddSongToQueue}
+                onRemoveFromList={(song) => handleToggleLike(song)}
+                onGoToExplore={() => setActiveTab('explore')}
+                onOpenGoogleLogin={() => window.auraAPI?.openGoogleLogin?.()}
+              />
+            )}
+
+            {/* Watch Later Library Tab */}
+            {activeTab === 'watchLater' && (
+              <LibraryView
+                type="watchLater"
+                songs={watchLaterSongs}
+                onPlaySong={handlePlayDirectSong}
+                onPlayAll={handlePlayAll}
+                onShuffleAll={handleShuffleAll}
+                onAddSongToQueue={handleAddSongToQueue}
+                onRemoveFromList={(song) => handleToggleWatchLater(song)}
+                onGoToExplore={() => setActiveTab('explore')}
+                onOpenGoogleLogin={() => window.auraAPI?.openGoogleLogin?.()}
+              />
+            )}
           </main>
 
           {/* If video mode is OFF, persistentPlayer is kept mounted in an off-dock position */}

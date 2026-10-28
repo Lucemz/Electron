@@ -1,11 +1,12 @@
 import React from 'react';
 import { Song } from '../types';
-import { Play, Trash2, Radio, Sparkles } from 'lucide-react';
+import { Play, Trash2, Radio, Sparkles, Clock } from 'lucide-react';
 
 interface QueueListProps {
   queue: Song[];
   onPlaySong: (index: number) => void;
   onRemoveSong: (index: number) => void;
+  onToggleWatchLater?: (song: Song) => void;
   isLoadingAi: boolean;
 }
 
@@ -13,6 +14,7 @@ export const QueueList: React.FC<QueueListProps> = ({
   queue,
   onPlaySong,
   onRemoveSong,
+  onToggleWatchLater,
   isLoadingAi,
 }) => {
   return (
@@ -80,7 +82,21 @@ export const QueueList: React.FC<QueueListProps> = ({
               </div>
 
               {/* Actions */}
-              <div className="flex items-center opacity-0 group-hover:opacity-100 transition">
+              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition">
+                {onToggleWatchLater && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onToggleWatchLater(song);
+                    }}
+                    className={`p-1.5 rounded-lg hover:bg-white/10 transition ${
+                      song.isSavedWatchLater ? 'text-aura-neonCyan' : 'text-aura-subtext hover:text-white'
+                    }`}
+                    title="Ver más tarde"
+                  >
+                    <Clock className="w-3.5 h-3.5" />
+                  </button>
+                )}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();

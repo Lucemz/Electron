@@ -6,11 +6,22 @@ const STORAGE_KEY_SETTINGS = 'aura_curation_settings';
 export function getUserTasteProfile(): UserTasteProfile {
   try {
     const raw = localStorage.getItem(STORAGE_KEY_TASTE);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      return {
+        likedSongs: parsed.likedSongs || [],
+        savedWatchLater: parsed.savedWatchLater || [],
+        favoriteArtists: parsed.favoriteArtists || [],
+        dislikedArtists: parsed.dislikedArtists || [],
+        playedHistory: parsed.playedHistory || [],
+        totalPlays: parsed.totalPlays || 0,
+      };
+    }
   } catch (e) {}
 
   return {
     likedSongs: [],
+    savedWatchLater: [],
     favoriteArtists: [],
     dislikedArtists: [],
     playedHistory: [],
@@ -33,7 +44,7 @@ export function toggleLikeSong(song: Song): { profile: UserTasteProfile; isLiked
     profile.likedSongs.splice(index, 1);
     isLiked = false;
   } else {
-    profile.likedSongs.push(song);
+    profile.likedSongs.push({ ...song, isLiked: true });
     isLiked = true;
     if (song.artist && !profile.favoriteArtists.includes(song.artist)) {
       profile.favoriteArtists.push(song.artist);
@@ -42,6 +53,81 @@ export function toggleLikeSong(song: Song): { profile: UserTasteProfile; isLiked
 
   saveUserTasteProfile(profile);
   return { profile, isLiked };
+}
+
+export function toggleWatchLaterSong(song: Song): { profile: UserTasteProfile; isSaved: boolean } {
+  const profile = getUserTasteProfile();
+  const index = profile.savedWatchLater.findIndex((s) => s.videoId === song.videoId || s.title === song.title);
+  let isSaved = false;
+
+  if (index >= 0) {
+    profile.savedWatchLater.splice(index, 1);
+    isSaved = false;
+  } else {
+    profile.savedWatchLater.push({ ...song, isSavedWatchLater: true });
+    isSaved = true;
+  }
+
+  saveUserTasteProfile(profile);
+  return { profile, isSaved };
+}
+
+/**
+ * Fetches and merges both local Aura liked songs and authenticated YouTube Music liked tracks
+ */
+export async function getCombinedLikedSongs(): Promise<Song[]> {
+  const profile = getUserTasteProfile();
+  const localLikes = profile.likedSongs || [];
+
+  if (window.auraAPI?.getUserLikedMusic) {
+    try {
+      const ytLikes = await window.auraAPI.getUserLikedMusic();
+      if (ytLikes && ytLikes.length > 0) {
+        const seen = new Set(localLikes.map((s) => s.videoId));
+        const merged = [...localLikes];
+        for (const s of ytLikes) {
+          if (!seen.has(s.videoId)) {
+            seen.add(s.videoId);
+            merged.push(s);
+          }
+        }
+        return merged;
+      }
+    } catch (e) {
+      console.warn('Failed to fetch YouTube likes, using local:', e);
+    }
+  }
+
+  return localLikes;
+}
+
+/**
+ * Fetches and merges both local Aura watch-later and authenticated YouTube Music watch-later tracks
+ */
+export async function getCombinedWatchLater(): Promise<Song[]> {
+  const profile = getUserTasteProfile();
+  const localSaved = profile.savedWatchLater || [];
+
+  if (window.auraAPI?.getUserWatchLater) {
+    try {
+      const ytWl = await window.auraAPI.getUserWatchLater();
+      if (ytWl && ytWl.length > 0) {
+        const seen = new Set(localSaved.map((s) => s.videoId));
+        const merged = [...localSaved];
+        for (const s of ytWl) {
+          if (!seen.has(s.videoId)) {
+            seen.add(s.videoId);
+            merged.push(s);
+          }
+        }
+        return merged;
+      }
+    } catch (e) {
+      console.warn('Failed to fetch YouTube watch later, using local:', e);
+    }
+  }
+
+  return localSaved;
 }
 
 export function recordPlayedSong(song: Song): void {

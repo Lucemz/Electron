@@ -3,6 +3,12 @@ const path = require('path');
 const fs = require('fs');
 const yts = require('yt-search');
 const { startStaticServer } = require('./server.cjs');
+const {
+  getExploreData,
+  getCategoryTracks,
+  getUserLikedMusic,
+  getUserWatchLater,
+} = require('./youtubeMusic.cjs');
 
 // Bypass Chromium's autoplay policy for seamless background/instant playback
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -196,6 +202,25 @@ ipcMain.handle('youtube:search-multiple', async (_, query, limit = 8) => {
     console.error('[Aura IPC] Error searching multiple:', error);
     return [];
   }
+});
+
+// YouTube Music Explore & Personalized Library Endpoints
+ipcMain.handle('youtube:get-explore', async () => {
+  return await getExploreData();
+});
+
+ipcMain.handle('youtube:get-category', async (_, browseId, params) => {
+  return await getCategoryTracks(browseId, params);
+});
+
+ipcMain.handle('youtube:get-user-liked', async () => {
+  const sess = session.fromPartition(SESSION_PARTITION);
+  return await getUserLikedMusic(sess);
+});
+
+ipcMain.handle('youtube:get-user-watch-later', async () => {
+  const sess = session.fromPartition(SESSION_PARTITION);
+  return await getUserWatchLater(sess);
 });
 
 // Official Google / YouTube Login Modal (No 400 error, supports Passkeys / Google prompt)

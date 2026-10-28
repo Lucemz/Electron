@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Sparkles, Search, Play, Plus, X, Loader2, ArrowRight } from 'lucide-react';
+import { Sparkles, Search, Play, Plus, X, Loader2, ArrowRight, Clock } from 'lucide-react';
 import { SearchResultItem, Song } from '../types';
 import { cleanSongTitle, cleanArtistName } from '../utils/textCleaner';
 
@@ -7,6 +7,7 @@ interface PromptBarProps {
   onPromptSubmit: (prompt: string) => void;
   onPlayDirectSong: (song: Song) => void;
   onAddSongToQueue: (song: Song) => void;
+  onToggleWatchLater?: (song: Song) => void;
   isLoading: boolean;
   aiProgressStep?: string | null;
 }
@@ -15,6 +16,7 @@ export const PromptBar: React.FC<PromptBarProps> = ({
   onPromptSubmit,
   onPlayDirectSong,
   onAddSongToQueue,
+  onToggleWatchLater,
   isLoading,
   aiProgressStep,
 }) => {
@@ -269,6 +271,20 @@ export const PromptBar: React.FC<PromptBarProps> = ({
                     <Play className="w-3 h-3 fill-current" />
                     <span className="hidden sm:inline">Play</span>
                   </button>
+
+                  {onToggleWatchLater && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onToggleWatchLater(convertSearchResultToSong(item));
+                        setShowResults(false);
+                      }}
+                      className="p-1.5 bg-white/5 hover:bg-white/15 text-aura-subtext hover:text-white rounded-lg transition cursor-pointer"
+                      title="Guardar en Ver más tarde"
+                    >
+                      <Clock className="w-3.5 h-3.5" />
+                    </button>
+                  )}
 
                   <button
                     type="button"

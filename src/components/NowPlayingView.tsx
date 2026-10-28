@@ -9,6 +9,7 @@ import {
   Video,
   Image as ImageIcon,
   Heart,
+  Clock,
   MessageSquare,
 } from 'lucide-react';
 
@@ -19,6 +20,7 @@ interface NowPlayingViewProps {
   onToggleVideo: () => void;
   onSmartSkip: () => void;
   onToggleLike: (song: Song) => void;
+  onToggleWatchLater: (song: Song) => void;
   onToggleDjChat: () => void;
   isAiLoading: boolean;
   videoSlot?: React.ReactNode;
@@ -31,6 +33,7 @@ export const NowPlayingView: React.FC<NowPlayingViewProps> = ({
   onToggleVideo,
   onSmartSkip,
   onToggleLike,
+  onToggleWatchLater,
   onToggleDjChat,
   isAiLoading,
   videoSlot,
@@ -142,18 +145,34 @@ export const NowPlayingView: React.FC<NowPlayingViewProps> = ({
             </p>
           </div>
 
-          {/* Heart / Like Button (Teaches AI) */}
-          <button
-            onClick={() => onToggleLike(currentSong)}
-            className={`p-2.5 rounded-2xl border transition cursor-pointer ${
-              currentSong.isLiked
-                ? 'bg-rose-500/20 border-rose-500/40 text-rose-500'
-                : 'bg-white/5 border-white/10 text-aura-subtext hover:text-white hover:bg-white/10'
-            }`}
-            title={currentSong.isLiked ? 'Canción que amas (registrada en memoria)' : 'Dar Like (enseña a tu AI DJ)'}
-          >
-            <Heart className={`w-5 h-5 ${currentSong.isLiked ? 'fill-current' : ''}`} />
-          </button>
+          {/* Actions: Like and Watch Later */}
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {/* Heart / Like Button (Teaches AI) */}
+            <button
+              onClick={() => onToggleLike(currentSong)}
+              className={`p-2.5 rounded-2xl border transition cursor-pointer ${
+                currentSong.isLiked
+                  ? 'bg-rose-500/20 border-rose-500/40 text-rose-500 shadow-neon'
+                  : 'bg-white/5 border-white/10 text-aura-subtext hover:text-white hover:bg-white/10'
+              }`}
+              title={currentSong.isLiked ? 'Canción que amas (registrada en memoria)' : 'Dar Like (enseña a tu AI DJ)'}
+            >
+              <Heart className={`w-5 h-5 ${currentSong.isLiked ? 'fill-current' : ''}`} />
+            </button>
+
+            {/* Watch Later Button */}
+            <button
+              onClick={() => onToggleWatchLater(currentSong)}
+              className={`p-2.5 rounded-2xl border transition cursor-pointer ${
+                currentSong.isSavedWatchLater
+                  ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-400 shadow-neon'
+                  : 'bg-white/5 border-white/10 text-aura-subtext hover:text-white hover:bg-white/10'
+              }`}
+              title={currentSong.isSavedWatchLater ? 'Guardada en Ver más tarde' : 'Guardar en Ver más tarde'}
+            >
+              <Clock className={`w-5 h-5 ${currentSong.isSavedWatchLater ? 'fill-current' : ''}`} />
+            </button>
+          </div>
         </div>
 
         {/* AI Curatorial Reason Card */}

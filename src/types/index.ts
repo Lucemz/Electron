@@ -14,6 +14,7 @@ export interface Song {
   searchQuery?: string;
   alternativeVideoIds?: string[];
   isLiked?: boolean;
+  isSavedWatchLater?: boolean;
 }
 
 export interface PlaybackState {
@@ -71,10 +72,32 @@ export interface CurationSettings {
 
 export interface UserTasteProfile {
   likedSongs: Song[];
+  savedWatchLater: Song[];
   favoriteArtists: string[];
   dislikedArtists: string[];
   playedHistory: string[];
   totalPlays: number;
+}
+
+export interface ExploreItem {
+  videoId?: string;
+  title: string;
+  artist?: string;
+  thumbnail: string;
+  durationFormatted?: string;
+  browseId?: string;
+}
+
+export interface MoodCategory {
+  title: string;
+  browseId: string;
+  params: string;
+}
+
+export interface ExploreData {
+  trending: ExploreItem[];
+  newReleases: ExploreItem[];
+  moodsAndGenres: MoodCategory[];
 }
 
 export interface AuraAPI {
@@ -89,6 +112,10 @@ export interface AuraAPI {
     alternativeVideoIds?: string[];
   } | null>;
   searchMultipleYouTube: (query: string, limit?: number) => Promise<SearchResultItem[]>;
+  getYouTubeExplore: () => Promise<ExploreData>;
+  getYouTubeCategory: (browseId: string, params?: string) => Promise<ExploreItem[]>;
+  getUserLikedMusic: () => Promise<Song[]>;
+  getUserWatchLater: () => Promise<Song[]>;
   openGoogleLogin: () => Promise<boolean>;
   toggleMiniPlayer: () => Promise<boolean>;
   isMiniPlayer: () => Promise<boolean>;
